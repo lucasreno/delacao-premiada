@@ -1,0 +1,8 @@
+# dados locais (amostras, chaves em settings, aprendizado) — nunca versionar
+data/
+
+__pycache__/
+*.pyc
+.venv/
+.tokensave/
+.claude/settings.local.json

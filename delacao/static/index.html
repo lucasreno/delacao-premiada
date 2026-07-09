@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Delação Premiada — Revisão</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#f7f7f5; --card:#fff; --ink:#1c1c1c; --mut:#777; --acc:#0a5c36; --warn:#a33; --lac:#fff3e0; }
+  * { box-sizing:border-box; }
+  body { font:14px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--ink); margin:0; padding:16px; }
+  h1 { font-size:18px; margin:0; }
+  header, section { max-width:1100px; margin:0 auto 14px; }
+  header { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .card { background:var(--card); border:1px solid #e2e2de; border-radius:8px; padding:12px; }
+  button { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:7px 14px; cursor:pointer; }
+  button.sec { background:#555; } button.ghost { background:transparent; color:var(--acc); }
+  input, select { border:1px solid #ccc; border-radius:5px; padding:5px 7px; font:inherit; }
+  input.time { width:64px; } td input:not(.time), td select { width:100%; }
+  table { width:100%; border-collapse:collapse; }
+  th { text-align:left; color:var(--mut); font-weight:600; font-size:12px; padding:4px 6px; }
+  td { padding:4px 6px; border-top:1px solid #eee; vertical-align:middle; }
+  tr.lacuna { background:var(--lac); }
+  .chip { display:inline-flex; gap:6px; align-items:center; background:#eee; border-radius:14px; padding:3px 10px; margin:3px; font-size:12px; }
+  .chip button { padding:1px 8px; font-size:11px; }
+  .mut { color:var(--mut); } .err { color:var(--warn); }
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block; background:#c33; }
+  .dot.ok { background:#2a2; }
+  dialog { border:1px solid #ccc; border-radius:8px; max-width:460px; width:90%; }
+  dialog label { display:block; margin:10px 0 2px; font-weight:600; font-size:12px; }
+  dialog input { width:100%; }
+  pre { background:#111; color:#eee; padding:12px; border-radius:8px; overflow-x:auto; white-space:pre-wrap; }
+  .ev { cursor:help; border-bottom:1px dotted var(--mut); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Delação Premiada</h1>
+  <span id="colStatus" class="mut"><span class="dot"></span> coletor</span>
+  <input type="date" id="date">
+  <span style="flex:1"></span>
+  <button class="ghost" onclick="dlg.showModal()">⚙ Configurações</button>
+</header>
+
+<section class="card">
+  <b>Jornada (ponto):</b>
+  <input id="ponto" placeholder="09:00-12:00, 13:00-18:00" style="width:280px">
+  <button class="sec" onclick="savePonto()">Salvar ponto</button>
+  <button onclick="propose()">Gerar proposta</button>
+  <span id="dayStatus" class="mut"></span>
+  <div id="msg" class="err"></div>
+</section>
+
+<section class="card">
+  <table id="tbl">
+    <thead><tr>
+      <th>Início</th><th>Fim</th><th style="width:18%">Projeto</th><th style="width:10%">Ticket</th>
+      <th style="width:14%">Atividade</th><th>Descrição</th><th>Contexto</th><th></th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+  <div style="margin-top:8px">
+    <button class="sec" onclick="addRow()">+ Linha</button>
+    <button class="sec" onclick="saveBlocks()">Salvar edições</button>
+    <button onclick="approve()">Aprovar dia</button>
+  </div>
+</section>
+
+<section class="card">
+  <b>Migalhas absorvidas</b> <span class="mut">(interrupções &lt; 5 min — promova se mereciam Lançamento)</span>
+  <div id="migalhas"></div>
+</section>
+
+<section class="card" id="resumoCard" style="display:none">
+  <b>Resumo aprovado — copie para o Clockify</b>
+  <span id="diverg" class="mut"></span>
+  <button class="ghost" onclick="navigator.clipboard.writeText(resumoEl.textContent)">Copiar</button>
+  <pre id="resumo"></pre>
+</section>
+
+<dialog id="dlg">
+  <form method="dialog">
+    <label>Clockify API key <span class="mut" id="ckState"></span></label>
+    <input id="ck" placeholder="deixe vazio para manter">
+    <label>OpenRouter API key <span class="mut" id="orState"></span></label>
+    <input id="or" placeholder="deixe vazio para manter">
+    <label>Modelo (OpenRouter)</label>
+    <input id="model">
+    <div style="margin-top:12px; display:flex; gap:8px">
+      <button type="button" onclick="saveSettings()">Salvar</button>
+      <button type="button" class="sec" onclick="syncClockify()">Sincronizar Clockify</button>
+      <button type="button" class="ghost" onclick="dlg.close()">Fechar</button>
+    </div>
+    <div id="dlgMsg" class="mut"></div>
+  </form>
+</dialog>
+
+<datalist id="projList"></datalist>
+
+<script>
+const $ = id => document.getElementById(id);
+const dlg = $('dlg'), resumoEl = $('resumo');
+let options = { projetos: [], atividades: [] };
+
+const api = async (path, method = 'GET', body) => {
+  const r = await fetch('/api' + path, {
+    method, headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.detail || r.statusText);
+  return j;
+};
+const msg = t => { $('msg').textContent = t || ''; };
+
+function tagSelect(v) {
+  const opts = ['<option value=""></option>']
+    .concat(options.atividades.map(a => `<option ${a === v ? 'selected' : ''}>${a}</option>`));
+  return `<select data-f="atividade">${opts.join('')}</select>`;
+}
+
+function row(b) {
+  const tr = document.createElement('tr');
+  tr.dataset.id = b.id || '';
+  tr.dataset.kind = b.kind || 'work';
+  if (b.kind === 'lacuna') {
+    tr.className = 'lacuna';
+    tr.innerHTML = `
+      <td><input class="time" data-f="start" value="${b.start}"></td>
+      <td><input class="time" data-f="end" value="${b.end}"></td>
+      <td colspan="4"><b>Lacuna (${b.dur_min} min sem atividade)</b> — estava em quê?
+        <button onclick="lacunaTrabalho(this)">Era trabalho</button>
+        <button class="sec" onclick="lacunaPausa(this)">Era pausa/almoço</button></td>
+      <td></td><td></td>`;
+    return tr;
+  }
+  const ev = Object.entries(b.evidence?.titles || {})
+    .map(([t, s]) => `${Math.round(s / 60)}min ${t}`).join('\n');
+  const shadow = Object.keys(b.evidence?.shadow || {}).length
+    ? ` ⚠ paralelo: ${Object.entries(b.evidence.shadow).map(([k, s]) => `${k} ${Math.round(s / 60)}min`).join(', ')}` : '';
+  tr.innerHTML = `
+    <td><input class="time" data-f="start" value="${b.start}"></td>
+    <td><input class="time" data-f="end" value="${b.end}"></td>
+    <td><input data-f="projeto" list="projList" value="${b.projeto || ''}"></td>
+    <td><input data-f="ticket" value="${b.ticket || ''}"></td>
+    <td>${tagSelect(b.atividade)}</td>
+    <td><input data-f="descricao" value="${b.descricao || ''}"></td>
+    <td class="mut"><span class="ev" title="${(ev + shadow).replaceAll('"', '&quot;')}">${b.contexto || 'manual'}${shadow ? ' ⚠' : ''}</span></td>
+    <td><button class="ghost" onclick="this.closest('tr').remove()">✕</button></td>`;
+  return tr;
+}
+
+function lacunaTrabalho(btn) {
+  const tr = btn.closest('tr');
+  const [s, e] = [...tr.querySelectorAll('input')].map(i => i.value);
+  tr.replaceWith(row({ start: s, end: e, kind: 'work' }));
+}
+function lacunaPausa(btn) {
+  const tr = btn.closest('tr'), prev = tr.previousElementSibling;
+  const end = tr.querySelector('[data-f=end]').value;
+  if (prev) prev.querySelector('[data-f=end]').value = end; // emenda ao anterior
+  tr.remove();
+}
+
+function addRow() { $('tbl').tBodies[0].appendChild(row({ start: '', end: '', kind: 'work' })); }
+
+function collect() {
+  return [...$('tbl').tBodies[0].rows].map(tr => {
+    const g = f => tr.querySelector(`[data-f=${f}]`)?.value || null;
+    return { id: tr.dataset.id ? +tr.dataset.id : null, kind: tr.dataset.kind,
+      start: g('start'), end: g('end'), projeto: g('projeto'), ticket: g('ticket'),
+      atividade: g('atividade'), descricao: g('descricao') };
+  }).filter(b => b.start && b.end);
+}
+
+function render(d) {
+  $('dayStatus').textContent = `status: ${d.status}`;
+  if (d.ponto) $('ponto').value = d.ponto.map(p => p.join('-')).join(', ');
+  const tb = $('tbl').tBodies[0];
+  tb.innerHTML = '';
+  d.blocks.forEach(b => tb.appendChild(row(b)));
+  $('migalhas').innerHTML = d.migalhas.map(m =>
+    `<span class="chip">${m.hora} · ${m.dur_min}min · ${m.title || m.contexto}
+     <button onclick='promover(${JSON.stringify(m)})'>Promover</button></span>`).join('') ||
+    '<span class="mut">nenhuma</span>';
+  if (d.warning) msg(d.warning);
+}
+
+function promover(m) {
+  const [h, min] = m.hora.split(':').map(Number);
+  const end = `${String(h + Math.floor((min + m.dur_min) / 60)).padStart(2, '0')}:${String((min + m.dur_min) % 60).padStart(2, '0')}`;
+  $('tbl').tBodies[0].appendChild(row({ start: m.hora, end, kind: 'work', descricao: m.title }));
+}
+
+async function load() {
+  msg('');
+  $('resumoCard').style.display = 'none';
+  try { render(await api('/day/' + $('date').value)); } catch (e) { msg(e.message); }
+}
+
+async function savePonto() {
+  const ponto = $('ponto').value.split(',').map(s => s.trim()).filter(Boolean)
+    .map(p => p.split('-').map(x => x.trim()));
+  try { render(await api(`/day/${$('date').value}/ponto`, 'POST', { ponto })); msg(''); }
+  catch (e) { msg(e.message); }
+}
+
+async function propose() {
+  msg('Gerando proposta (segmentação + IA)...');
+  try { render(await api(`/day/${$('date').value}/propose`, 'POST')); if (!$('msg').textContent.includes('falhou')) msg(''); }
+  catch (e) { msg(e.message); }
+}
+
+async function saveBlocks() {
+  try { render(await api(`/day/${$('date').value}/blocks`, 'PUT', { blocks: collect() })); msg('Edições salvas.'); }
+  catch (e) { msg(e.message); }
+}
+
+async function approve() {
+  try {
+    await api(`/day/${$('date').value}/blocks`, 'PUT', { blocks: collect() });
+    const r = await api(`/day/${$('date').value}/approve`, 'POST');
+    resumoEl.textContent = r.resumo.join('\n');
+    $('diverg').textContent = ` — total ${Math.floor(r.total_min / 60)}h${String(r.total_min % 60).padStart(2, '0')}` +
+      (r.divergencia_min != null ? `, divergência do ponto: ${r.divergencia_min} min` : '');
+    $('resumoCard').style.display = '';
+    $('dayStatus').textContent = 'status: aprovado';
+  } catch (e) { msg(e.message); }
+}
+
+async function loadSettings() {
+  const s = await api('/settings');
+  $('ckState').textContent = s.clockify_api_key ? '(configurada ✓)' : '(faltando)';
+  $('orState').textContent = s.openrouter_api_key ? '(configurada ✓)' : '(faltando)';
+  $('model').value = s.model;
+}
+async function saveSettings() {
+  await api('/settings', 'POST', { clockify_api_key: $('ck').value, openrouter_api_key: $('or').value, model: $('model').value });
+  $('ck').value = $('or').value = '';
+  $('dlgMsg').textContent = 'Salvo.';
+  loadSettings(); refreshStatus();
+}
+async function syncClockify() {
+  $('dlgMsg').textContent = 'Sincronizando...';
+  try {
+    const r = await api('/clockify/sync', 'POST');
+    $('dlgMsg').textContent = `OK: ${r.projetos} projetos, ${r.atividades} atividades, ${r.lancamentos_lidos} lançamentos lidos.`;
+    await loadOptions();
+  } catch (e) { $('dlgMsg').textContent = 'Erro: ' + e.message; }
+}
+
+async function loadOptions() {
+  options = await api('/options');
+  $('projList').innerHTML = options.projetos.map(p => `<option value="${p}">`).join('');
+}
+
+async function refreshStatus() {
+  const s = await api('/status');
+  $('colStatus').innerHTML = `<span class="dot ${s.samples_hoje ? 'ok' : ''}"></span> ${s.samples_hoje} amostras hoje` +
+    (s.ultima ? ` <span class="mut">(última ${s.ultima.hora}: ${s.ultima.app})</span>` : '');
+}
+
+$('date').value = new Date().toLocaleDateString('sv');
+$('date').onchange = load;
+loadOptions().then(load);
+loadSettings();
+refreshStatus();
+setInterval(refreshStatus, 30000);
+</script>
+</body>
+</html>
