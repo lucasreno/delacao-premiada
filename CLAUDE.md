@@ -1,0 +1,47 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+Ferramenta local que amostra **metadados de janela** (app ativo, título, ociosidade — nunca screenshots, ver `docs/adr/0001`) e propõe os Lançamentos do dia no Clockify, com o usuário como revisor final. Alvo de produção é Ubuntu/X11; Windows funciona via WinAPI e é usado para desenvolvimento.
+
+## Commands
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python -m delacao        # coletor (thread) + UI de Revisão em http://127.0.0.1:8746
+```
+
+- `DP_DATA_DIR=/algum/dir` redireciona o SQLite (`data/data.db`) — use em dev para não sujar os dados reais.
+- Não há testes nem linter configurados.
+- API keys (Clockify, OpenRouter) ficam na tabela `settings` do SQLite, configuradas pela UI — não em env vars ou arquivos.
+
+## Language
+
+Todo o projeto — código, comentários, UI, prompts — é em **português**. `CONTEXT.md` define o vocabulário do domínio e os sinônimos a evitar. Os termos centrais, usados literalmente no código:
+
+- **Lançamento** (registro no Clockify), **Atividade** (= Tag no Clockify), **Ticket** (= Task no Clockify, padrão `ABC-123`), **Descrição**
+- **Bloco de Trabalho** (intervalo contíguo dominado por um contexto; vira um Lançamento), **Migalha** (trabalho < 5 min), **Lacuna** (vazio longo que vira pergunta na Revisão)
+- **Jornada/ponto** (períodos entrada/saída), **Timesheet Proposto**, **Revisão**
+
+## Architecture
+
+Pipeline linear, um módulo por estágio, tudo compartilhando o SQLite via `db.py`:
+
+1. **`collector.py`** — thread daemon iniciada em `__main__.py`. Backends por plataforma (`X11Backend`/`WindowsBackend`, mesma interface: `active_window`, `idle_ms`, `all_titles`) amostram a cada `POLL_S` (5s) e inserem em `samples`. Detecção de chamada (Meet/Teams) por regex sobre **todos** os títulos de janela (`call_patterns` em settings, default em `config.py`). Em erro, zera o backend e reconecta.
+2. **`segmenter.py`** — funções puras, sem I/O: amostras → spans (`build_spans`) → Blocos/Migalhas/Lacunas (`consolidate`) → recorte ao ponto (`fit_to_period`). As regras (chamada vence ociosidade; Migalha absorvida; vazio ≤ 15 min emendado) estão no docstring do módulo; os limiares em `config.py`. `context_key()` é a heurística que reduz app+título a uma chave (`ticket:`, `dev:`, `web:`, `call:`...). O campo `shadow` registra atividade paralela durante chamadas.
+3. **`classifier.py`** — um único chamado em lote ao OpenRouter (texto, não visão) classifica os blocos do dia em (Projeto, Ticket, Atividade, Descrição). Few-shot: correções da Revisão (tabela `corrections`) + bootstrap do histórico Clockify (cache `bootstrap_examples`).
+4. **`web.py`** — FastAPI, toda a API + estado do dia. Frontend é um único `delacao/static/index.html` vanilla, servido estático.
+5. **`clockify.py`** — cliente **somente leitura** (decisão de design): sincroniza Projetos/Tags e histórico para o bootstrap. A ferramenta nunca escreve no Clockify; o usuário copia o resumo aprovado manualmente.
+
+### Fluxos que atravessam módulos
+
+- **Proposta é regenerável**: `POST /api/day/{date}/propose` apaga e recria `blocks`/`migalhas` a partir das `samples` (fonte da verdade imutável). Edições manuais do usuário vão via `PUT /api/day/{date}/blocks` e são perdidas se repropuser.
+- **Loop de aprendizado**: no `approve`, blocos cujo `final` difere do `proposed` da IA viram linhas em `corrections`, que alimentam os exemplos do `classifier` nas próximas propostas. É o mecanismo central do produto — mudanças na Revisão ou no classifier devem preservá-lo.
+- **`db.py`**: conexão SQLite singleton com lock (o coletor e o FastAPI compartilham threads); helpers `q`/`ex`, tabelas `settings` e `cache` como key-value.
+
+## Decisões registradas
+
+ADRs em `docs/adr/`. A restrição estrutural da v1: o pipeline inteiro é orientado a **eventos de texto** — adicionar visão/screenshots depois é aditivo, mas trocar essa espinha dorsal não é. Wayland não é suportado (leitura de janela ativa exige X11).
