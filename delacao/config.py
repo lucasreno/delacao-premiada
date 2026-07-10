@@ -13,6 +13,9 @@ IDLE_AFTER_S = 180    # sem teclado/mouse por 3 min = ocioso
 MIGALHA_S = 300       # trabalho contíguo < 5 min é Migalha
 STITCH_S = 900        # Lacuna <= 15 min é emendada ao bloco anterior
 
+RETENTION_DAYS = 30   # amostras de dias aprovados são purgadas após N dias (0 = nunca)
+PURGE_EVERY_S = 3600  # frequência da purga, dentro do loop do coletor
+
 DEFAULT_MODEL = "google/gemini-2.5-flash-lite"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 

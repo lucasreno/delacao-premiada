@@ -1,14 +1,16 @@
 """API + UI da Revisão."""
 
+import csv
+import io
 import json
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
-from . import classifier, clockify, config, db, segmenter
+from . import classifier, clockify, collector, config, db, segmenter
 
 app = FastAPI(title="Delação Premiada")
 STATIC = Path(__file__).parent / "static"
@@ -51,6 +53,8 @@ def _day_payload(date):
                 "ticket": b["ticket"],
                 "atividade": b["atividade"],
                 "descricao": b["descricao"],
+                "confianca": b["confianca"],
+                "edited": bool(b["edited"]),
             }
         )
     migalhas = [
@@ -81,6 +85,7 @@ def status():
         "ultima": {**last[0], "hora": _hm(last[0]["ts"])} if last else None,
         "clockify_ok": bool(db.setting("clockify_api_key")),
         "openrouter_ok": bool(db.setting("openrouter_api_key")),
+        "coletor": dict(collector.health),
     }
 
 
@@ -180,20 +185,7 @@ def propose(date: str):
         try:
             rows = db.q(
                 f"SELECT * FROM blocks WHERE id IN ({','.join('?' * len(ids))})", tuple(ids))
-            results = classifier.classify(rows)
-            for bid, r in results.items():
-                proposed = {
-                    "projeto": r.get("projeto"),
-                    "ticket": r.get("ticket"),
-                    "atividade": r.get("atividade"),
-                    "descricao": r.get("descricao"),
-                }
-                db.ex(
-                    "UPDATE blocks SET projeto=?, ticket=COALESCE(?, ticket), atividade=?, "
-                    "descricao=?, proposed=? WHERE id=?",
-                    (proposed["projeto"], proposed["ticket"], proposed["atividade"],
-                     proposed["descricao"], json.dumps(proposed, ensure_ascii=False), bid),
-                )
+            _apply_classification(rows)
         except Exception as e:
             warning = f"Classificação IA falhou: {e}"
 
@@ -202,26 +194,85 @@ def propose(date: str):
     return payload
 
 
+def _apply_classification(rows):
+    """Roda o classifier sobre as rows e grava resultado + proposta + confiança.
+    Zera `edited`: o conteúdo volta a ser proposta da IA."""
+    results = classifier.classify(rows)
+    for bid, r in results.items():
+        proposed = {
+            "projeto": r.get("projeto"),
+            "ticket": r.get("ticket"),
+            "atividade": r.get("atividade"),
+            "descricao": r.get("descricao"),
+        }
+        try:
+            conf = min(1.0, max(0.0, float(r.get("confianca"))))
+        except (TypeError, ValueError):
+            conf = None
+        db.ex(
+            "UPDATE blocks SET projeto=?, ticket=COALESCE(?, ticket), atividade=?, "
+            "descricao=?, proposed=?, confianca=?, edited=0 WHERE id=?",
+            (proposed["projeto"], proposed["ticket"], proposed["atividade"],
+             proposed["descricao"], json.dumps(proposed, ensure_ascii=False), conf, bid),
+        )
+    return len(results)
+
+
+@app.post("/api/day/{date}/classify")
+def classify_day(date: str, body: dict = Body(default={})):
+    """Reclassifica via IA sem re-segmentar: preserva horários e blocos manuais.
+    Sem `ids`, pega os blocos de trabalho não editados; com `ids`, exatamente esses."""
+    d = _day_row(date)
+    if d and d["status"] == "aprovado":
+        raise HTTPException(400, "Dia já aprovado.")
+    ids = body.get("ids") or []
+    if ids:
+        rows = db.q(
+            f"SELECT * FROM blocks WHERE date=? AND kind='work' "
+            f"AND id IN ({','.join('?' * len(ids))})", (date, *ids))
+    else:
+        rows = db.q(
+            "SELECT * FROM blocks WHERE date=? AND kind='work' AND edited=0 "
+            "AND context_key!='manual'", (date,))
+    if not rows:
+        raise HTTPException(400, "Nenhum bloco para reclassificar.")
+    try:
+        n = _apply_classification(rows)
+    except Exception as e:
+        raise HTTPException(400, f"Classificação IA falhou: {e}")
+    payload = _day_payload(date)
+    payload["reclassificados"] = n
+    return payload
+
+
 @app.put("/api/day/{date}/blocks")
 def put_blocks(date: str, body: dict = Body(...)):
     incoming = body.get("blocks") or []
-    existing = {b["id"] for b in db.q("SELECT id FROM blocks WHERE date=?", (date,))}
+    existing = {b["id"]: b for b in db.q("SELECT * FROM blocks WHERE date=?", (date,))}
     kept = set()
     for b in incoming:
         start, end = _ts(date, b["start"]), _ts(date, b["end"])
         fields = (start, end, b.get("kind") or "work", b.get("projeto"), b.get("ticket"),
                   b.get("atividade"), b.get("descricao"))
-        if b.get("id") in existing:
+        old = existing.get(b.get("id"))
+        if old:
+            # Marca como editado se a classificação mudou (bloco sai do alvo do
+            # "Reclassificar IA" e a divergência vira correção no approve).
+            edited = old["edited"] or any(
+                (b.get(f) or None) != (old[f] or None)
+                for f in ("projeto", "ticket", "atividade", "descricao"))
             db.ex(
                 "UPDATE blocks SET start_ts=?, end_ts=?, kind=?, projeto=?, ticket=?, "
-                "atividade=?, descricao=? WHERE id=?", fields + (b["id"],))
+                "atividade=?, descricao=?, edited=? WHERE id=?",
+                fields + (1 if edited else 0, b["id"]))
             kept.add(b["id"])
         else:
             db.ex(
                 "INSERT INTO blocks(start_ts, end_ts, kind, projeto, ticket, atividade, "
-                "descricao, date, context_key, evidence) VALUES(?,?,?,?,?,?,?,?,'manual','{}')",
+                "descricao, date, context_key, evidence, edited) "
+                "VALUES(?,?,?,?,?,?,?,?,'manual','{}',1)",
                 fields + (date,))
-    for bid in existing - kept:
+    for bid in set(existing) - kept:
         db.ex("DELETE FROM blocks WHERE id=?", (bid,))
     return _day_payload(date)
 
@@ -232,6 +283,9 @@ def approve(date: str):
     if not rows:
         raise HTTPException(400, "Nada para aprovar — gere a proposta primeiro.")
     now = int(time.time())
+    # Re-aprovar substitui as correções do dia em vez de duplicá-las (elas alimentam
+    # o few-shot do classifier; duplicata envenena o aprendizado).
+    db.ex("DELETE FROM corrections WHERE date=?", (date,))
     for b in rows:
         if b["kind"] != "work" or not b["proposed"]:
             continue
@@ -260,3 +314,26 @@ def approve(date: str):
         "jornada_min": jornada // 60,
         "divergencia_min": abs(total - jornada) // 60 if jornada else None,
     }
+
+
+@app.get("/api/day/{date}/export.csv")
+def export_csv(date: str):
+    rows = db.q(
+        "SELECT * FROM blocks WHERE date=? AND kind='work' ORDER BY start_ts", (date,))
+    if not rows:
+        raise HTTPException(400, "Nada para exportar.")
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["Data", "Início", "Fim", "Duração", "Projeto", "Ticket",
+                "Atividade", "Descrição"])
+    for b in rows:
+        dur = b["end_ts"] - b["start_ts"]
+        w.writerow([date, _hm(b["start_ts"]), _hm(b["end_ts"]),
+                    f"{dur // 3600:02d}:{dur % 3600 // 60:02d}:00",
+                    b["projeto"] or "", b["ticket"] or "", b["atividade"] or "",
+                    b["descricao"] or ""])
+    return Response(
+        "﻿" + buf.getvalue(),  # BOM: Excel pt-BR abre UTF-8 corretamente
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="delacao-{date}.csv"'},
+    )

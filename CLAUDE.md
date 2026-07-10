@@ -15,8 +15,9 @@ python -m delacao        # coletor (thread) + UI de Revisão em http://127.0.0.1
 ```
 
 - `DP_DATA_DIR=/algum/dir` redireciona o SQLite (`data/data.db`) — use em dev para não sujar os dados reais.
-- Não há testes nem linter configurados.
+- `python -m pytest` roda os testes (regras do `segmenter`); não há linter configurado.
 - API keys (Clockify, OpenRouter) ficam na tabela `settings` do SQLite, configuradas pela UI — não em env vars ou arquivos.
+- Deploy no Ubuntu: `deploy/delacao.service` (systemd user unit); `pip install -e .` dá o comando `delacao`.
 
 ## Language
 
@@ -38,9 +39,10 @@ Pipeline linear, um módulo por estágio, tudo compartilhando o SQLite via `db.p
 
 ### Fluxos que atravessam módulos
 
-- **Proposta é regenerável**: `POST /api/day/{date}/propose` apaga e recria `blocks`/`migalhas` a partir das `samples` (fonte da verdade imutável). Edições manuais do usuário vão via `PUT /api/day/{date}/blocks` e são perdidas se repropuser.
-- **Loop de aprendizado**: no `approve`, blocos cujo `final` difere do `proposed` da IA viram linhas em `corrections`, que alimentam os exemplos do `classifier` nas próximas propostas. É o mecanismo central do produto — mudanças na Revisão ou no classifier devem preservá-lo.
-- **`db.py`**: conexão SQLite singleton com lock (o coletor e o FastAPI compartilham threads); helpers `q`/`ex`, tabelas `settings` e `cache` como key-value.
+- **Proposta é regenerável**: `POST /api/day/{date}/propose` apaga e recria `blocks`/`migalhas` a partir das `samples` (fonte da verdade — quase imutável: amostras de dias aprovados são purgadas após `retention_days`, default 30, pelo coletor). Edições manuais vão via `PUT /api/day/{date}/blocks` (marcam `blocks.edited=1`) e são perdidas se repropuser — a UI pede confirmação. `POST /api/day/{date}/classify` re-roda **só** a IA: sem `ids`, os blocos não editados; com `ids`, exatamente esses (e zera `edited`).
+- **Loop de aprendizado**: no `approve`, blocos cujo `final` difere do `proposed` da IA viram linhas em `corrections`, que alimentam os exemplos do `classifier` nas próximas propostas. É o mecanismo central do produto — mudanças na Revisão ou no classifier devem preservá-lo. Re-aprovar apaga e regrava as correções do dia (idempotente, não duplica). A `confianca` da IA é gravada no bloco e a Revisão destaca os duvidosos (< 0.7).
+- **`db.py`**: conexão SQLite singleton com lock (o coletor e o FastAPI compartilham threads); helpers `q`/`ex`, tabelas `settings` e `cache` como key-value; `MIGRATIONS` são `ALTER TABLE` idempotentes para bancos antigos.
+- **Frontend**: todo valor interpolado em HTML passa por `esc()` — títulos de janela e saídas da IA são dado hostil. Promover Migalha fatia o bloco que a absorveu (senão o tempo contaria duas vezes). A timeline usa paleta categórica fixa: cor segue o Projeto, nunca a posição.
 
 ## Decisões registradas
 

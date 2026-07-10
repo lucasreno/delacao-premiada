@@ -1,0 +1,20 @@
+# Unit systemd de usuário — mantém o coletor vivo na sessão gráfica.
+# Instalação:
+#   cp deploy/delacao.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now delacao
+# Ajuste WorkingDirectory/ExecStart se o repositório não estiver em ~/delacao-premiada.
+
+[Unit]
+Description=Delação Premiada — coletor + UI de Revisão
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+WorkingDirectory=%h/delacao-premiada
+ExecStart=%h/delacao-premiada/.venv/bin/python -m delacao
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

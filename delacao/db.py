@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS days(date TEXT PRIMARY KEY, ponto TEXT, status TEXT D
 CREATE TABLE IF NOT EXISTS blocks(
   id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, start_ts INTEGER, end_ts INTEGER,
   kind TEXT, context_key TEXT, evidence TEXT, proposed TEXT,
-  projeto TEXT, ticket TEXT, atividade TEXT, descricao TEXT);
+  projeto TEXT, ticket TEXT, atividade TEXT, descricao TEXT,
+  confianca REAL, edited INTEGER DEFAULT 0);
 CREATE INDEX IF NOT EXISTS idx_blocks_date ON blocks(date);
 CREATE TABLE IF NOT EXISTS migalhas(
   id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, ts INTEGER, dur_s INTEGER,
@@ -27,6 +28,13 @@ CREATE TABLE IF NOT EXISTS corrections(
 CREATE TABLE IF NOT EXISTS cache(key TEXT PRIMARY KEY, value TEXT, ts INTEGER);
 """
 
+# Bancos criados antes das colunas existirem no SCHEMA (o CREATE IF NOT EXISTS não altera
+# tabela existente); coluna duplicada é ignorada.
+MIGRATIONS = [
+    "ALTER TABLE blocks ADD COLUMN confianca REAL",
+    "ALTER TABLE blocks ADD COLUMN edited INTEGER DEFAULT 0",
+]
+
 
 def conn():
     global _conn
@@ -35,6 +43,12 @@ def conn():
         _conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
         _conn.row_factory = sqlite3.Row
         _conn.executescript(SCHEMA)
+        for m in MIGRATIONS:
+            try:
+                _conn.execute(m)
+            except sqlite3.OperationalError:
+                pass
+        _conn.commit()
     return _conn
 
 

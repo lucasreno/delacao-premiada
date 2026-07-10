@@ -8,6 +8,9 @@ import time
 
 from . import config, db
 
+# Saúde do coletor, lida pelo /api/status (mesmo processo, thread separada).
+health = {"erro": None, "ociosidade_ok": True}
+
 
 def _call_patterns():
     raw = db.setting("call_patterns")
@@ -16,6 +19,8 @@ def _call_patterns():
 
 
 class WindowsBackend:
+    idle_ok = True
+
     def __init__(self):
         import ctypes
         import ctypes.wintypes as wt
@@ -73,6 +78,8 @@ class WindowsBackend:
 
 
 class X11Backend:
+    idle_ok = True
+
     def __init__(self):
         from Xlib import X, display
         from Xlib.ext import screensaver  # noqa: F401 (registra a extensão)
@@ -113,12 +120,17 @@ class X11Backend:
 
     def idle_ms(self):
         try:
-            return self.root.screensaver_query_info().idle
+            idle = self.root.screensaver_query_info().idle
         except Exception:
             try:
-                return int(subprocess.check_output(["xprintidle"], timeout=2))
+                idle = int(subprocess.check_output(["xprintidle"], timeout=2))
             except Exception:
+                # Sem fonte de ociosidade o usuário nunca fica "ocioso" e as Lacunas
+                # somem — sinaliza para o /api/status em vez de falhar calado.
+                self.idle_ok = False
                 return 0
+        self.idle_ok = True
+        return idle
 
     def all_titles(self):
         out = []
@@ -148,8 +160,25 @@ def read_sample(backend, patterns):
     return app, title, idle_ms, call_title
 
 
+def purge_samples():
+    """Apaga amostras de dias já aprovados há mais de N dias (títulos de janela são
+    dado sensível — ver ADR-0001; depois de aprovado, o dia não precisa mais delas)."""
+    try:
+        days = int(db.setting("retention_days", config.RETENTION_DAYS))
+    except (TypeError, ValueError):
+        days = config.RETENTION_DAYS
+    if days <= 0:
+        return
+    db.ex(
+        "DELETE FROM samples WHERE date(ts,'unixepoch','localtime') IN ("
+        "SELECT date FROM days WHERE status='aprovado' AND date < date('now','localtime',?))",
+        (f"-{days} day",),
+    )
+
+
 def run():
     backend = None
+    last_purge = 0.0
     while True:
         try:
             if backend is None:
@@ -161,7 +190,13 @@ def run():
                 (int(time.time()), app, title or "", int(idle_ms),
                  1 if call_title else 0, call_title),
             )
+            health["erro"] = None
+            health["ociosidade_ok"] = getattr(backend, "idle_ok", True)
+            if time.time() - last_purge > config.PURGE_EVERY_S:
+                purge_samples()
+                last_purge = time.time()
         except Exception as e:
+            health["erro"] = str(e)
             print(f"collector: {e}", file=sys.stderr)
             backend = None  # reconecta (ex.: X server reiniciou)
         time.sleep(config.POLL_S)

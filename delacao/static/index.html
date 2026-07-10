@@ -12,24 +12,40 @@
   header, section { max-width:1100px; margin:0 auto 14px; }
   header { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
   .card { background:var(--card); border:1px solid #e2e2de; border-radius:8px; padding:12px; }
-  button { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:7px 14px; cursor:pointer; }
-  button.sec { background:#555; } button.ghost { background:transparent; color:var(--acc); }
+  button, a.btn { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:7px 14px; cursor:pointer; font:inherit; text-decoration:none; display:inline-block; }
+  button.sec, a.btn.sec { background:#555; } button.ghost, a.btn.ghost { background:transparent; color:var(--acc); }
   input, select { border:1px solid #ccc; border-radius:5px; padding:5px 7px; font:inherit; }
   input.time { width:64px; } td input:not(.time), td select { width:100%; }
   table { width:100%; border-collapse:collapse; }
   th { text-align:left; color:var(--mut); font-weight:600; font-size:12px; padding:4px 6px; }
   td { padding:4px 6px; border-top:1px solid #eee; vertical-align:middle; }
   tr.lacuna { background:var(--lac); }
+  tr.low { background:#fffbee; }
+  tr.flash { animation:flash 1.4s; }
+  @keyframes flash { from { background:#ffe9a8; } }
   .chip { display:inline-flex; gap:6px; align-items:center; background:#eee; border-radius:14px; padding:3px 10px; margin:3px; font-size:12px; }
   .chip button { padding:1px 8px; font-size:11px; }
   .mut { color:var(--mut); } .err { color:var(--warn); }
   .dot { width:9px; height:9px; border-radius:50%; display:inline-block; background:#c33; }
   .dot.ok { background:#2a2; }
+  .conf { font-size:11px; color:#898781; margin-left:4px; }
+  .conf.low { color:#8a5a00; font-weight:600; }
   dialog { border:1px solid #ccc; border-radius:8px; max-width:460px; width:90%; }
   dialog label { display:block; margin:10px 0 2px; font-weight:600; font-size:12px; }
   dialog input { width:100%; }
-  pre { background:#111; color:#eee; padding:12px; border-radius:8px; overflow-x:auto; white-space:pre-wrap; }
+  .rl { display:flex; gap:6px; align-items:center; }
+  .rl code { flex:1; background:#111; color:#eee; padding:3px 8px; border-radius:4px; overflow-x:auto; white-space:pre; }
+  .rl button { padding:2px 8px; }
   .ev { cursor:help; border-bottom:1px dotted var(--mut); }
+  /* Timeline do dia */
+  .tl { position:relative; height:32px; background:#fcfcfb; border:1px solid #e1e0d9; border-radius:6px; margin:8px 0 0; }
+  .tl .seg { position:absolute; top:5px; bottom:5px; border-radius:4px; min-width:3px; cursor:pointer; }
+  .tl .seg.lacuna { background:var(--lac); background-image:repeating-linear-gradient(45deg, rgba(0,0,0,.12) 0 3px, transparent 3px 7px); }
+  .tl .tick { position:absolute; bottom:1px; width:2px; height:6px; background:#898781; border-radius:1px; }
+  .tlaxis { position:relative; height:15px; font-size:10px; color:#898781; }
+  .tlaxis span { position:absolute; transform:translateX(-50%); }
+  .tlleg { font-size:12px; color:#52514e; display:flex; gap:12px; flex-wrap:wrap; margin-top:6px; }
+  .tlleg .sw { width:9px; height:9px; border-radius:2px; display:inline-block; margin-right:4px; vertical-align:baseline; }
 </style>
 </head>
 <body>
@@ -46,8 +62,10 @@
   <input id="ponto" placeholder="09:00-12:00, 13:00-18:00" style="width:280px">
   <button class="sec" onclick="savePonto()">Salvar ponto</button>
   <button onclick="propose()">Gerar proposta</button>
+  <button class="sec" onclick="reclassify()" title="Re-roda só a IA nos blocos não editados; horários e edições ficam intactos">Reclassificar IA</button>
   <span id="dayStatus" class="mut"></span>
   <div id="msg" class="err"></div>
+  <div id="timeline"></div>
 </section>
 
 <section class="card">
@@ -62,6 +80,7 @@
     <button class="sec" onclick="addRow()">+ Linha</button>
     <button class="sec" onclick="saveBlocks()">Salvar edições</button>
     <button onclick="approve()">Aprovar dia</button>
+    <a id="csvLink" class="btn ghost" href="#" download>Baixar CSV</a>
   </div>
 </section>
 
@@ -73,8 +92,8 @@
 <section class="card" id="resumoCard" style="display:none">
   <b>Resumo aprovado — copie para o Clockify</b>
   <span id="diverg" class="mut"></span>
-  <button class="ghost" onclick="navigator.clipboard.writeText(resumoEl.textContent)">Copiar</button>
-  <pre id="resumo"></pre>
+  <button class="ghost" onclick="copyAll()">Copiar tudo</button>
+  <div id="resumo" style="margin-top:8px"></div>
 </section>
 
 <dialog id="dlg">
@@ -98,8 +117,16 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const dlg = $('dlg'), resumoEl = $('resumo');
+const dlg = $('dlg');
 let options = { projetos: [], atividades: [] };
+const state = { migalhas: [], resumo: [] };
+
+// Títulos de janela e saídas da IA são dado hostil — escapar SEMPRE antes de interpolar em HTML.
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+
+const toMin = hm => { const [h, m] = String(hm || '').split(':').map(Number); return h * 60 + (m || 0); };
+const toHM = min => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
 
 const api = async (path, method = 'GET', body) => {
   const r = await fetch('/api' + path, {
@@ -114,7 +141,7 @@ const msg = t => { $('msg').textContent = t || ''; };
 
 function tagSelect(v) {
   const opts = ['<option value=""></option>']
-    .concat(options.atividades.map(a => `<option ${a === v ? 'selected' : ''}>${a}</option>`));
+    .concat(options.atividades.map(a => `<option ${a === v ? 'selected' : ''}>${esc(a)}</option>`));
   return `<select data-f="atividade">${opts.join('')}</select>`;
 }
 
@@ -125,8 +152,8 @@ function row(b) {
   if (b.kind === 'lacuna') {
     tr.className = 'lacuna';
     tr.innerHTML = `
-      <td><input class="time" data-f="start" value="${b.start}"></td>
-      <td><input class="time" data-f="end" value="${b.end}"></td>
+      <td><input class="time" data-f="start" value="${esc(b.start)}"></td>
+      <td><input class="time" data-f="end" value="${esc(b.end)}"></td>
       <td colspan="4"><b>Lacuna (${b.dur_min} min sem atividade)</b> — estava em quê?
         <button onclick="lacunaTrabalho(this)">Era trabalho</button>
         <button class="sec" onclick="lacunaPausa(this)">Era pausa/almoço</button></td>
@@ -137,15 +164,19 @@ function row(b) {
     .map(([t, s]) => `${Math.round(s / 60)}min ${t}`).join('\n');
   const shadow = Object.keys(b.evidence?.shadow || {}).length
     ? ` ⚠ paralelo: ${Object.entries(b.evidence.shadow).map(([k, s]) => `${k} ${Math.round(s / 60)}min`).join(', ')}` : '';
+  const conf = b.confianca != null
+    ? `<span class="conf${b.confianca < 0.7 ? ' low' : ''}" title="confiança da IA">${b.confianca < 0.7 ? '⚠ ' : ''}${Math.round(b.confianca * 100)}%</span>` : '';
+  const edited = b.edited ? '<span class="conf" title="editado por você">✎</span>' : '';
+  if (b.confianca != null && b.confianca < 0.7) tr.className = 'low';
   tr.innerHTML = `
-    <td><input class="time" data-f="start" value="${b.start}"></td>
-    <td><input class="time" data-f="end" value="${b.end}"></td>
-    <td><input data-f="projeto" list="projList" value="${b.projeto || ''}"></td>
-    <td><input data-f="ticket" value="${b.ticket || ''}"></td>
+    <td><input class="time" data-f="start" value="${esc(b.start)}"></td>
+    <td><input class="time" data-f="end" value="${esc(b.end)}"></td>
+    <td><input data-f="projeto" list="projList" value="${esc(b.projeto)}"></td>
+    <td><input data-f="ticket" value="${esc(b.ticket)}"></td>
     <td>${tagSelect(b.atividade)}</td>
-    <td><input data-f="descricao" value="${b.descricao || ''}"></td>
-    <td class="mut"><span class="ev" title="${(ev + shadow).replaceAll('"', '&quot;')}">${b.contexto || 'manual'}${shadow ? ' ⚠' : ''}</span></td>
-    <td><button class="ghost" onclick="this.closest('tr').remove()">✕</button></td>`;
+    <td><input data-f="descricao" value="${esc(b.descricao)}"></td>
+    <td class="mut"><span class="ev" title="${esc(ev + shadow)}">${esc(b.contexto || 'manual')}${shadow ? ' ⚠' : ''}</span>${conf}${edited}</td>
+    <td>${b.id ? `<button class="ghost" title="Reclassificar só este bloco via IA" onclick="reclassifyOne(${b.id})">🔁</button>` : ''}<button class="ghost" onclick="this.closest('tr').remove()">✕</button></td>`;
   return tr;
 }
 
@@ -172,28 +203,137 @@ function collect() {
   }).filter(b => b.start && b.end);
 }
 
+/* ---------- Timeline do dia ---------- */
+// Paleta categórica validada (CVD ΔE 24.2 na superfície clara); a tabela abaixo é a
+// "visão tabela" exigida para os tons de baixo contraste. Cor segue o Projeto, nunca a posição.
+const PALETTE = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834'];
+const projColor = new Map();
+function colorFor(projeto) {
+  if (!projeto) return '#c3c2b7';
+  if (!projColor.has(projeto)) {
+    projColor.set(projeto, projColor.size < PALETTE.length ? PALETTE[projColor.size] : '#898781');
+  }
+  return projColor.get(projeto);
+}
+
+function renderTimeline(d) {
+  const host = $('timeline');
+  host.innerHTML = '';
+  const pts = (d.ponto || []).flat().map(toMin);
+  const blocks = d.blocks.filter(b => b.start && b.end);
+  const all = blocks.flatMap(b => [toMin(b.start), toMin(b.end)]).concat(pts);
+  if (!all.length) return;
+  const t0 = Math.min(...all), t1 = Math.max(...all), span = Math.max(1, t1 - t0);
+  const pct = m => (m - t0) / span * 100;
+
+  const strip = document.createElement('div');
+  strip.className = 'tl';
+  for (const b of blocks) {
+    const s = toMin(b.start), e = toMin(b.end);
+    const seg = document.createElement('div');
+    seg.className = 'seg' + (b.kind === 'lacuna' ? ' lacuna' : '');
+    seg.style.left = pct(s) + '%';
+    seg.style.width = `calc(${Math.max(0, pct(e) - pct(s))}% - 2px)`; // 2px de respiro entre blocos
+    if (b.kind !== 'lacuna') seg.style.background = colorFor(b.projeto);
+    seg.title = b.kind === 'lacuna'
+      ? `${b.start}–${b.end}  Lacuna (${b.dur_min} min)`
+      : `${b.start}–${b.end}  ${b.projeto || b.contexto || '?'}${b.descricao ? ' — ' + b.descricao : ''}`;
+    if (b.id) seg.onclick = () => {
+      const tr = [...$('tbl').tBodies[0].rows].find(r => +r.dataset.id === b.id);
+      if (tr) { tr.scrollIntoView({ block: 'center', behavior: 'smooth' }); tr.classList.remove('flash'); void tr.offsetWidth; tr.classList.add('flash'); }
+    };
+    strip.appendChild(seg);
+  }
+  for (const m of state.migalhas) {
+    const tick = document.createElement('div');
+    tick.className = 'tick';
+    tick.style.left = pct(toMin(m.hora)) + '%';
+    tick.title = `Migalha ${m.hora} · ${m.dur_min}min · ${m.title || m.contexto}`;
+    strip.appendChild(tick);
+  }
+  host.appendChild(strip);
+
+  const axis = document.createElement('div');
+  axis.className = 'tlaxis';
+  const stepH = span > 12 * 60 ? 2 : 1;
+  for (let h = Math.ceil(t0 / 60); h * 60 <= t1; h += stepH) {
+    const lab = document.createElement('span');
+    lab.style.left = pct(h * 60) + '%';
+    lab.textContent = `${h}h`;
+    axis.appendChild(lab);
+  }
+  host.appendChild(axis);
+
+  const used = [...new Set(blocks.filter(b => b.kind !== 'lacuna' && b.projeto).map(b => b.projeto))];
+  if (used.length || blocks.some(b => b.kind === 'lacuna')) {
+    const leg = document.createElement('div');
+    leg.className = 'tlleg';
+    for (const p of used) {
+      const item = document.createElement('span');
+      const sw = document.createElement('span');
+      sw.className = 'sw'; sw.style.background = colorFor(p);
+      item.append(sw, document.createTextNode(p));
+      leg.appendChild(item);
+    }
+    if (blocks.some(b => b.kind === 'lacuna')) {
+      const item = document.createElement('span');
+      const sw = document.createElement('span');
+      sw.className = 'sw';
+      sw.style.background = 'var(--lac) repeating-linear-gradient(45deg, rgba(0,0,0,.12) 0 2px, transparent 2px 4px)';
+      item.append(sw, document.createTextNode('Lacuna'));
+      leg.appendChild(item);
+    }
+    host.appendChild(leg);
+  }
+}
+
 function render(d) {
   $('dayStatus').textContent = `status: ${d.status}`;
   if (d.ponto) $('ponto').value = d.ponto.map(p => p.join('-')).join(', ');
+  state.migalhas = d.migalhas;
   const tb = $('tbl').tBodies[0];
   tb.innerHTML = '';
   d.blocks.forEach(b => tb.appendChild(row(b)));
-  $('migalhas').innerHTML = d.migalhas.map(m =>
-    `<span class="chip">${m.hora} · ${m.dur_min}min · ${m.title || m.contexto}
-     <button onclick='promover(${JSON.stringify(m)})'>Promover</button></span>`).join('') ||
+  $('migalhas').innerHTML = d.migalhas.map((m, i) =>
+    `<span class="chip">${esc(m.hora)} · ${m.dur_min}min · ${esc(m.title || m.contexto)}
+     <button onclick="promover(${i})">Promover</button></span>`).join('') ||
     '<span class="mut">nenhuma</span>';
+  renderTimeline(d);
   if (d.warning) msg(d.warning);
 }
 
-function promover(m) {
-  const [h, min] = m.hora.split(':').map(Number);
-  const end = `${String(h + Math.floor((min + m.dur_min) / 60)).padStart(2, '0')}:${String((min + m.dur_min) % 60).padStart(2, '0')}`;
-  $('tbl').tBodies[0].appendChild(row({ start: m.hora, end, kind: 'work', descricao: m.title }));
+// Promover fatia o bloco que absorveu a Migalha (o tempo dela já estava contado lá);
+// sem o fatiamento, o dia contaria a mesma faixa duas vezes.
+function promover(i) {
+  const m = state.migalhas[i];
+  const s = toMin(m.hora), rawEnd = s + m.dur_min;
+  const tb = $('tbl').tBodies[0];
+  for (const tr of [...tb.rows]) {
+    if (tr.dataset.kind !== 'work') continue;
+    const g = f => tr.querySelector(`[data-f=${f}]`)?.value || '';
+    const bs = toMin(g('start')), be = toMin(g('end'));
+    if (!(s >= bs && s < be)) continue;
+    const e = Math.min(rawEnd, be);
+    const fields = { projeto: g('projeto'), ticket: g('ticket'),
+      atividade: g('atividade'), descricao: g('descricao') };
+    const parts = [];
+    if (s - bs >= 1) parts.push(row({ ...fields, start: toHM(bs), end: toHM(s), kind: 'work',
+      id: +tr.dataset.id || null }));
+    parts.push(row({ start: toHM(s), end: toHM(e), kind: 'work', descricao: m.title }));
+    if (be - e >= 1) parts.push(row({ ...fields, start: toHM(e), end: toHM(be), kind: 'work' }));
+    parts.reverse().forEach(p => tr.after(p));
+    tr.remove();
+    msg('Migalha promovida: o bloco que a absorveu foi fatiado. Revise e salve as edições.');
+    return;
+  }
+  tb.appendChild(row({ start: m.hora, end: toHM(rawEnd), kind: 'work', descricao: m.title }));
+  msg('Migalha promovida como novo bloco. Salve as edições.');
 }
 
 async function load() {
   msg('');
   $('resumoCard').style.display = 'none';
+  $('csvLink').href = `/api/day/${$('date').value}/export.csv`;
   try { render(await api('/day/' + $('date').value)); } catch (e) { msg(e.message); }
 }
 
@@ -205,9 +345,30 @@ async function savePonto() {
 }
 
 async function propose() {
+  if ($('tbl').tBodies[0].rows.length &&
+      !confirm('Gerar nova proposta apaga os blocos atuais, INCLUSIVE edições manuais. Continuar?')) return;
   msg('Gerando proposta (segmentação + IA)...');
   try { render(await api(`/day/${$('date').value}/propose`, 'POST')); if (!$('msg').textContent.includes('falhou')) msg(''); }
   catch (e) { msg(e.message); }
+}
+
+async function reclassify() {
+  msg('Reclassificando via IA (blocos não editados)...');
+  try {
+    const d = await api(`/day/${$('date').value}/classify`, 'POST', {});
+    render(d);
+    msg(`${d.reclassificados} bloco(s) reclassificado(s).`);
+  } catch (e) { msg(e.message); }
+}
+
+async function reclassifyOne(id) {
+  msg('Reclassificando bloco...');
+  try {
+    await api(`/day/${$('date').value}/blocks`, 'PUT', { blocks: collect() });
+    const d = await api(`/day/${$('date').value}/classify`, 'POST', { ids: [id] });
+    render(d);
+    msg('Bloco reclassificado.');
+  } catch (e) { msg(e.message); }
 }
 
 async function saveBlocks() {
@@ -215,11 +376,16 @@ async function saveBlocks() {
   catch (e) { msg(e.message); }
 }
 
+function copyAll() { navigator.clipboard.writeText(state.resumo.join('\n')); }
+function copyLine(i) { navigator.clipboard.writeText(state.resumo[i]); }
+
 async function approve() {
   try {
     await api(`/day/${$('date').value}/blocks`, 'PUT', { blocks: collect() });
     const r = await api(`/day/${$('date').value}/approve`, 'POST');
-    resumoEl.textContent = r.resumo.join('\n');
+    state.resumo = r.resumo;
+    $('resumo').innerHTML = r.resumo.map((l, i) =>
+      `<div class="rl"><code>${esc(l)}</code><button class="ghost" title="Copiar linha" onclick="copyLine(${i})">⧉</button></div>`).join('');
     $('diverg').textContent = ` — total ${Math.floor(r.total_min / 60)}h${String(r.total_min % 60).padStart(2, '0')}` +
       (r.divergencia_min != null ? `, divergência do ponto: ${r.divergencia_min} min` : '');
     $('resumoCard').style.display = '';
@@ -250,13 +416,17 @@ async function syncClockify() {
 
 async function loadOptions() {
   options = await api('/options');
-  $('projList').innerHTML = options.projetos.map(p => `<option value="${p}">`).join('');
+  $('projList').innerHTML = options.projetos.map(p => `<option value="${esc(p)}">`).join('');
 }
 
 async function refreshStatus() {
   const s = await api('/status');
+  const c = s.coletor || {};
+  let alerta = '';
+  if (c.erro) alerta = ` <span class="err">⚠ coletor com erro: ${esc(c.erro)}</span>`;
+  else if (c.ociosidade_ok === false) alerta = ' <span class="err">⚠ detecção de ociosidade indisponível — Lacunas não serão detectadas</span>';
   $('colStatus').innerHTML = `<span class="dot ${s.samples_hoje ? 'ok' : ''}"></span> ${s.samples_hoje} amostras hoje` +
-    (s.ultima ? ` <span class="mut">(última ${s.ultima.hora}: ${s.ultima.app})</span>` : '');
+    (s.ultima ? ` <span class="mut">(última ${esc(s.ultima.hora)}: ${esc(s.ultima.app)})</span>` : '') + alerta;
 }
 
 $('date').value = new Date().toLocaleDateString('sv');
