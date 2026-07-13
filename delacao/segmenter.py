@@ -2,7 +2,8 @@
 
 Regras (ver CONTEXT.md):
 - chamada ativa vence ociosidade e vence a janela ativa em outro monitor;
-- trabalho contíguo < MIGALHA_S é absorvido pelo bloco vizinho e dedatado;
+- trabalho contíguo < MIGALHA_S é absorvido pelo bloco vizinho e dedatado; os títulos
+  da Migalha ficam na evidência do bloco absorvedor (campo `migalhas`);
 - vazio (ocioso/sem dados) <= STITCH_S é emendado ao bloco anterior;
 - vazio maior vira Lacuna (pergunta na Revisão).
 """
@@ -80,6 +81,7 @@ def build_spans(samples, poll_s=config.POLL_S, idle_after_s=config.IDLE_AFTER_S,
 def consolidate(spans, migalha_s=config.MIGALHA_S, stitch_s=config.STITCH_S):
     out, migalhas = [], []
     pending_start = None
+    pending_migalhas = Counter()  # títulos de Migalhas ainda sem bloco absorvedor
 
     def top_title(sp):
         return sp["titles"].most_common(1)[0][0] if sp["titles"] else ""
@@ -90,8 +92,10 @@ def consolidate(spans, migalha_s=config.MIGALHA_S, stitch_s=config.STITCH_S):
         if sp["key"] == "__vazio__":
             if dur > stitch_s:
                 out.append({"kind": "lacuna", "key": "lacuna", "start": sp["start"],
-                            "end": sp["end"], "titles": Counter(), "shadow": Counter()})
+                            "end": sp["end"], "titles": Counter(), "shadow": Counter(),
+                            "migalhas": Counter()})
                 pending_start = None
+                pending_migalhas = Counter()
             elif prev and prev["kind"] == "work":
                 prev["end"] = sp["end"]
             continue
@@ -100,8 +104,11 @@ def consolidate(spans, migalha_s=config.MIGALHA_S, stitch_s=config.STITCH_S):
                              "title": top_title(sp)})
             if prev and prev["kind"] == "work":
                 prev["end"] = sp["end"]
-            elif pending_start is None:
-                pending_start = sp["start"]
+                prev["migalhas"] += sp["titles"]
+            else:
+                if pending_start is None:
+                    pending_start = sp["start"]
+                pending_migalhas += sp["titles"]
             continue
         start = pending_start if pending_start is not None else sp["start"]
         pending_start = None
@@ -109,9 +116,12 @@ def consolidate(spans, migalha_s=config.MIGALHA_S, stitch_s=config.STITCH_S):
             prev["end"] = sp["end"]
             prev["titles"] += sp["titles"]
             prev["shadow"] += sp["shadow"]
+            prev["migalhas"] += pending_migalhas
         else:
             out.append({"kind": "work", "key": sp["key"], "start": start, "end": sp["end"],
-                        "titles": sp["titles"].copy(), "shadow": sp["shadow"].copy()})
+                        "titles": sp["titles"].copy(), "shadow": sp["shadow"].copy(),
+                        "migalhas": pending_migalhas.copy()})
+        pending_migalhas = Counter()
     return out, migalhas
 
 

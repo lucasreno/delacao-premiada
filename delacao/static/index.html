@@ -90,9 +90,11 @@
 </section>
 
 <section class="card" id="resumoCard" style="display:none">
-  <b>Resumo aprovado — copie para o Clockify</b>
+  <b>Resumo aprovado</b>
   <span id="diverg" class="mut"></span>
+  <button onclick="pushClockify()" title="Cria os Lançamentos no Clockify; reenviar substitui os que a ferramenta criou antes (nunca toca nos demais)">Enviar ao Clockify</button>
   <button class="ghost" onclick="copyAll()">Copiar tudo</button>
+  <span id="pushMsg" class="mut"></span>
   <div id="resumo" style="margin-top:8px"></div>
 </section>
 
@@ -104,9 +106,16 @@
     <input id="or" placeholder="deixe vazio para manter">
     <label>Modelo (OpenRouter)</label>
     <input id="model">
+    <label>Jira — URL base <span class="mut">(ex.: https://empresa.atlassian.net; vazio = sem Jira)</span></label>
+    <input id="jiraUrl">
+    <label>Jira — e-mail <span class="mut">(Cloud; deixe vazio se usar token pessoal de Server/DC)</span></label>
+    <input id="jiraEmail">
+    <label>Jira — API token <span class="mut" id="jiraState"></span></label>
+    <input id="jiraTok" placeholder="deixe vazio para manter">
     <div style="margin-top:12px; display:flex; gap:8px">
       <button type="button" onclick="saveSettings()">Salvar</button>
       <button type="button" class="sec" onclick="syncClockify()">Sincronizar Clockify</button>
+      <button type="button" class="sec" onclick="syncJira()">Sincronizar Jira</button>
       <button type="button" class="ghost" onclick="dlg.close()">Fechar</button>
     </div>
     <div id="dlgMsg" class="mut"></div>
@@ -162,6 +171,9 @@ function row(b) {
   }
   const ev = Object.entries(b.evidence?.titles || {})
     .map(([t, s]) => `${Math.round(s / 60)}min ${t}`).join('\n');
+  const mig = Object.keys(b.evidence?.migalhas || {}).length
+    ? '\nmigalhas absorvidas: ' + Object.entries(b.evidence.migalhas)
+      .map(([t, s]) => `${Math.max(1, Math.round(s / 60))}min ${t}`).join('; ') : '';
   const shadow = Object.keys(b.evidence?.shadow || {}).length
     ? ` ⚠ paralelo: ${Object.entries(b.evidence.shadow).map(([k, s]) => `${k} ${Math.round(s / 60)}min`).join(', ')}` : '';
   const conf = b.confianca != null
@@ -175,7 +187,7 @@ function row(b) {
     <td><input data-f="ticket" value="${esc(b.ticket)}"></td>
     <td>${tagSelect(b.atividade)}</td>
     <td><input data-f="descricao" value="${esc(b.descricao)}"></td>
-    <td class="mut"><span class="ev" title="${esc(ev + shadow)}">${esc(b.contexto || 'manual')}${shadow ? ' ⚠' : ''}</span>${conf}${edited}</td>
+    <td class="mut"><span class="ev" title="${esc(ev + mig + shadow)}">${esc(b.contexto || 'manual')}${shadow ? ' ⚠' : ''}</span>${conf}${edited}</td>
     <td>${b.id ? `<button class="ghost" title="Reclassificar só este bloco via IA" onclick="reclassifyOne(${b.id})">🔁</button>` : ''}<button class="ghost" onclick="this.closest('tr').remove()">✕</button></td>`;
   return tr;
 }
@@ -389,8 +401,20 @@ async function approve() {
     $('diverg').textContent = ` — total ${Math.floor(r.total_min / 60)}h${String(r.total_min % 60).padStart(2, '0')}` +
       (r.divergencia_min != null ? `, divergência do ponto: ${r.divergencia_min} min` : '');
     $('resumoCard').style.display = '';
+    $('pushMsg').textContent = '';
     $('dayStatus').textContent = 'status: aprovado';
   } catch (e) { msg(e.message); }
+}
+
+async function pushClockify() {
+  if (!confirm('Enviar os Lançamentos deste dia ao Clockify? Reenviar substitui os lançamentos que a ferramenta criou antes.')) return;
+  $('pushMsg').textContent = 'Enviando...';
+  try {
+    const r = await api(`/day/${$('date').value}/clockify`, 'POST');
+    $('pushMsg').textContent = `${r.criados} lançamento(s) criado(s)` +
+      (r.substituidos ? `, ${r.substituidos} substituído(s)` : '') +
+      (r.erros.length ? ` — erros: ${r.erros.join(' | ')}` : '.');
+  } catch (e) { $('pushMsg').textContent = 'Erro: ' + e.message; }
 }
 
 async function loadSettings() {
@@ -398,10 +422,14 @@ async function loadSettings() {
   $('ckState').textContent = s.clockify_api_key ? '(configurada ✓)' : '(faltando)';
   $('orState').textContent = s.openrouter_api_key ? '(configurada ✓)' : '(faltando)';
   $('model').value = s.model;
+  $('jiraUrl').value = s.jira_base_url;
+  $('jiraEmail').value = s.jira_email;
+  $('jiraState').textContent = s.jira_api_token ? '(configurado ✓)' : '(faltando)';
 }
 async function saveSettings() {
-  await api('/settings', 'POST', { clockify_api_key: $('ck').value, openrouter_api_key: $('or').value, model: $('model').value });
-  $('ck').value = $('or').value = '';
+  await api('/settings', 'POST', { clockify_api_key: $('ck').value, openrouter_api_key: $('or').value, model: $('model').value,
+    jira_base_url: $('jiraUrl').value, jira_email: $('jiraEmail').value, jira_api_token: $('jiraTok').value });
+  $('ck').value = $('or').value = $('jiraTok').value = '';
   $('dlgMsg').textContent = 'Salvo.';
   loadSettings(); refreshStatus();
 }
@@ -411,6 +439,13 @@ async function syncClockify() {
     const r = await api('/clockify/sync', 'POST');
     $('dlgMsg').textContent = `OK: ${r.projetos} projetos, ${r.atividades} atividades, ${r.lancamentos_lidos} lançamentos lidos.`;
     await loadOptions();
+  } catch (e) { $('dlgMsg').textContent = 'Erro: ' + e.message; }
+}
+async function syncJira() {
+  $('dlgMsg').textContent = 'Sincronizando Jira...';
+  try {
+    const r = await api('/jira/sync', 'POST');
+    $('dlgMsg').textContent = `OK: ${r.tickets} tickets do Jira viram candidatos do classificador.`;
   } catch (e) { $('dlgMsg').textContent = 'Erro: ' + e.message; }
 }
 

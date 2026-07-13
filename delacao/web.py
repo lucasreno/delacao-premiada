@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 
-from . import classifier, clockify, collector, config, db, segmenter
+from . import classifier, clockify, collector, config, db, jira, segmenter
 
 app = FastAPI(title="Delação Premiada")
 STATIC = Path(__file__).parent / "static"
@@ -95,12 +95,16 @@ def get_settings():
         "clockify_api_key": bool(db.setting("clockify_api_key")),
         "openrouter_api_key": bool(db.setting("openrouter_api_key")),
         "model": db.setting("model") or config.DEFAULT_MODEL,
+        "jira_base_url": db.setting("jira_base_url") or "",
+        "jira_email": db.setting("jira_email") or "",
+        "jira_api_token": bool(db.setting("jira_api_token")),
     }
 
 
 @app.post("/api/settings")
 def post_settings(body: dict = Body(...)):
-    for k in ("clockify_api_key", "openrouter_api_key", "model"):
+    for k in ("clockify_api_key", "openrouter_api_key", "model",
+              "jira_base_url", "jira_email", "jira_api_token"):
         v = (body.get(k) or "").strip()
         if v:
             db.set_setting(k, v)
@@ -111,6 +115,14 @@ def post_settings(body: dict = Body(...)):
 def clockify_sync():
     try:
         return clockify.sync()
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/jira/sync")
+def jira_sync():
+    try:
+        return jira.sync()
     except Exception as e:
         raise HTTPException(400, str(e))
 
@@ -161,6 +173,7 @@ def propose(date: str):
         ev = {
             "titles": dict(b["titles"].most_common(6)),
             "shadow": dict(b["shadow"].most_common(3)),
+            "migalhas": dict(b["migalhas"].most_common(4)) if b.get("migalhas") else {},
         }
         ticket = b["key"].split(":", 1)[1] if b["key"].startswith("ticket:") else None
         bid = db.ex(
@@ -182,6 +195,7 @@ def propose(date: str):
 
     warning = None
     if ids:
+        jira.maybe_sync()  # candidatos a Ticket frescos para o classifier (não-fatal)
         try:
             rows = db.q(
                 f"SELECT * FROM blocks WHERE id IN ({','.join('?' * len(ids))})", tuple(ids))
@@ -314,6 +328,19 @@ def approve(date: str):
         "jornada_min": jornada // 60,
         "divergencia_min": abs(total - jornada) // 60 if jornada else None,
     }
+
+
+@app.post("/api/day/{date}/clockify")
+def push_clockify(date: str):
+    """Envia os Lançamentos do dia aprovado ao Clockify (ADR-0002). Reenvio
+    substitui os lançamentos criados anteriormente pela ferramenta."""
+    d = _day_row(date)
+    if not d or d["status"] != "aprovado":
+        raise HTTPException(400, "Aprove o dia antes de enviar ao Clockify.")
+    try:
+        return clockify.push_day(date)
+    except Exception as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/day/{date}/export.csv")

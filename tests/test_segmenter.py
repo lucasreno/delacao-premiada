@@ -101,6 +101,19 @@ class TestConsolidate:
         assert len(blocks) == 1 and blocks[0]["start"] == 0
         assert len(migalhas) == 1
 
+    def test_migalha_absorvida_deixa_titulos_na_evidencia(self):
+        spans = [span("dev:a", 0, 600),
+                 span("dev:b", 600, 660, {"outro-repo – Devcheck.java": 60}),
+                 span("dev:a", 660, 1260)]
+        blocks, _ = consolidate(spans)
+        assert len(blocks) == 1
+        assert blocks[0]["migalhas"] == Counter({"outro-repo – Devcheck.java": 60})
+
+    def test_migalha_no_inicio_deixa_titulos_no_bloco_seguinte(self):
+        spans = [span("web:x", 0, 60, {"PROJ board - Jira": 60}), span("dev:a", 60, 660)]
+        blocks, _ = consolidate(spans)
+        assert blocks[0]["migalhas"] == Counter({"PROJ board - Jira": 60})
+
     def test_blocos_contiguos_da_mesma_chave_se_fundem(self):
         spans = [span("dev:a", 0, 600, {"t1": 600}), span("__vazio__", 600, 700),
                  span("dev:a", 700, 1300, {"t2": 600})]

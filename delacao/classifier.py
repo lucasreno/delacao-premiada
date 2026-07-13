@@ -45,6 +45,7 @@ def classify(blocks):
     """Recebe rows de blocks (kind=work); retorna {block_id: resultado}."""
     projects = [p["name"] for p in (db.cache_get("projects") or [])]
     tags = [t["name"] for t in (db.cache_get("tags") or [])]
+    jira = db.cache_get("jira_tickets") or []
     sys_prompt = (
         "Você classifica blocos de trabalho de um programador em lançamentos de horas do Clockify.\n"
         f"Projetos disponíveis: {json.dumps(projects, ensure_ascii=False)}\n"
@@ -54,6 +55,19 @@ def classify(blocks):
         "descricao (curta, em português, dizendo o assunto do trabalho) e confianca (0 a 1).\n"
         "Blocos com contexto 'call:' são reuniões: use a atividade de reunião/daily adequada "
         "e o nome da reunião na descrição.\n"
+        "O campo 'migalhas_absorvidas' lista verificações rápidas (< 5 min) engolidas pelo "
+        "bloco (ex.: devchecks, conferências no Jira); quando forem assunto distinto do bloco, "
+        "cite-as brevemente no fim da descricao.\n"
+    )
+    if jira:
+        sys_prompt += (
+            "Tickets recentes do usuário no Jira (candidatos prováveis): "
+            f"{json.dumps(jira, ensure_ascii=False)}\n"
+            "Os títulos de janela raramente trazem o código do ticket: infira-o cruzando "
+            "títulos (branch, arquivo, resumo) com esses candidatos. Não invente ticket "
+            "fora da lista sem código explícito no título.\n"
+        )
+    sys_prompt += (
         f"Exemplos reais de lançamentos deste usuário:\n"
         f"{json.dumps(examples(), ensure_ascii=False)}\n"
         'Responda SOMENTE um array JSON: [{"id":1,"projeto":"...","ticket":null,'
@@ -69,6 +83,7 @@ def classify(blocks):
                 "contexto": b["context_key"],
                 "titulos": ev.get("titles", {}),
                 "atividade_paralela_durante_chamada": ev.get("shadow") or None,
+                "migalhas_absorvidas": ev.get("migalhas") or None,
             }
         )
     model = db.setting("model") or config.DEFAULT_MODEL

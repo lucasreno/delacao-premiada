@@ -35,7 +35,7 @@ Período dentro da Jornada sem atividade observada no computador. Lacunas curtas
 _Avoid_: buraco, gap, ociosidade
 
 **Migalha**:
-Interrupção mais curta que o limiar de absorção (padrão: 5 minutos), engolida pelo Bloco de Trabalho onde caiu. As Migalhas do dia são dedatadas na Revisão, onde o usuário pode promovê-las a Lançamento próprio.
+Interrupção mais curta que o limiar de absorção (padrão: 5 minutos), engolida pelo Bloco de Trabalho onde caiu. Os títulos da Migalha permanecem na evidência do bloco absorvedor (a IA pode citá-los na Descrição — ex.: devchecks). As Migalhas do dia são dedatadas na Revisão, onde o usuário pode promovê-las a Lançamento próprio.
 _Avoid_: fragmento, micro-tarefa
 
 **Timesheet Proposto**:
