@@ -311,6 +311,14 @@ function render(d) {
      <button onclick="promover(${i})">Promover</button></span>`).join('') ||
     '<span class="mut">nenhuma</span>';
   renderTimeline(d);
+  if (d.status === 'aprovado' && d.resumo) {
+    state.resumo = d.resumo;
+    $('diverg').textContent = ` — total ${Math.floor(d.total_min / 60)}h${String(d.total_min % 60).padStart(2, '0')}` +
+      (d.divergencia_min != null ? `, divergência do ponto: ${d.divergencia_min} min` : '');
+    $('resumo').innerHTML = d.resumo.map((l, i) =>
+      `<div class="rl"><code>${esc(l)}</code><button onclick="copyLine(${i})">⧉</button></div>`).join('');
+    $('resumoCard').style.display = '';
+  }
   if (d.warning) msg(d.warning);
 }
 

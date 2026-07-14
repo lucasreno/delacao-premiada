@@ -62,11 +62,33 @@ def _day_payload(date):
          "contexto": m["context_key"], "title": m["title"]}
         for m in db.q("SELECT * FROM migalhas WHERE date=? ORDER BY ts", (date,))
     ]
-    return {
+    payload = {
         "ponto": json.loads(d["ponto"]) if d and d["ponto"] else None,
         "status": d["status"] if d else "aberto",
         "blocks": blocks,
         "migalhas": migalhas,
+    }
+    if d and d["status"] == "aprovado":
+        rows = db.q("SELECT * FROM blocks WHERE date=? ORDER BY start_ts", (date,))
+        payload.update(_resumo(date, rows))
+    return payload
+
+
+def _resumo(date, rows):
+    """Linhas de resumo do dia aprovado (usado no approve e ao recarregar a página)."""
+    total = sum(b["end_ts"] - b["start_ts"] for b in rows if b["kind"] == "work")
+    jornada = sum(pe - ps for ps, pe in _periods(date))
+    linhas = [
+        f"{_hm(b['start_ts'])}–{_hm(b['end_ts'])}  "
+        f"{(b['end_ts'] - b['start_ts']) // 3600}h{((b['end_ts'] - b['start_ts']) % 3600) // 60:02d}  "
+        f"{b['projeto'] or '?'} | {b['ticket'] or '-'} | {b['atividade'] or '?'} | {b['descricao'] or ''}"
+        for b in rows if b["kind"] == "work"
+    ]
+    return {
+        "resumo": linhas,
+        "total_min": total // 60,
+        "jornada_min": jornada // 60,
+        "divergencia_min": abs(total - jornada) // 60 if jornada else None,
     }
 
 
@@ -313,21 +335,7 @@ def approve(date: str):
                 "INSERT INTO corrections(ts, date, evidence, proposed, final) VALUES(?,?,?,?,?)",
                 (now, date, evidence, b["proposed"], json.dumps(final, ensure_ascii=False)))
     db.ex("UPDATE days SET status='aprovado' WHERE date=?", (date,))
-
-    total = sum(b["end_ts"] - b["start_ts"] for b in rows if b["kind"] == "work")
-    jornada = sum(pe - ps for ps, pe in _periods(date))
-    linhas = [
-        f"{_hm(b['start_ts'])}–{_hm(b['end_ts'])}  "
-        f"{(b['end_ts'] - b['start_ts']) // 3600}h{((b['end_ts'] - b['start_ts']) % 3600) // 60:02d}  "
-        f"{b['projeto'] or '?'} | {b['ticket'] or '-'} | {b['atividade'] or '?'} | {b['descricao'] or ''}"
-        for b in rows if b["kind"] == "work"
-    ]
-    return {
-        "resumo": linhas,
-        "total_min": total // 60,
-        "jornada_min": jornada // 60,
-        "divergencia_min": abs(total - jornada) // 60 if jornada else None,
-    }
+    return _resumo(date, rows)
 
 
 @app.post("/api/day/{date}/clockify")
