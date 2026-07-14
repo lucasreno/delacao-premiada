@@ -28,7 +28,7 @@ def context_key(app, title):
     if m:
         return f"ticket:{m.group(1)}"
     if any(x in a for x in JETBRAINS):
-        seg = re.split(r"\s+[–—-]\s+", t)[0].strip()
+        seg = re.split(r"\s+[–-]\s+", t)[0].strip()
         return f"dev:{seg or a}"
     if "code" in a:
         parts = [p.strip() for p in t.split(" - ") if p.strip()]
@@ -36,7 +36,7 @@ def context_key(app, title):
             parts = parts[:-1]
         return f"dev:{parts[-1] if parts else 'vscode'}"
     if any(b in a for b in BROWSERS):
-        parts = [p.strip() for p in re.split(r"\s+[-–—]\s+", t) if p.strip()]
+        parts = [p.strip() for p in re.split(r"\s+[-–]\s+", t) if p.strip()]
         if parts and any(b in parts[-1].lower() for b in BROWSERS + ("google chrome",)):
             parts = parts[:-1]
         return f"web:{parts[-1] if parts else 'navegador'}"

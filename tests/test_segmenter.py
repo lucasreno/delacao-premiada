@@ -1,4 +1,4 @@
-"""Testes das regras de segmentação (funções puras — ver docstring do módulo).
+"""Testes das regras de segmentação (funções puras - ver docstring do módulo).
 
 Limiares reais de config: POLL_S=5, IDLE_AFTER_S=180, MIGALHA_S=300, STITCH_S=900,
 NO_DATA_GAP_S=90. Os testes usam os defaults para validar o comportamento de produção.
@@ -23,7 +23,7 @@ def span(key, start, end, titles=None):
 
 class TestContextKey:
     def test_ticket_no_titulo_vence_tudo(self):
-        assert context_key("chrome", "PROJ-123 Corrigir bug — Jira") == "ticket:PROJ-123"
+        assert context_key("chrome", "PROJ-123 Corrigir bug - Jira") == "ticket:PROJ-123"
 
     def test_jetbrains_usa_primeiro_segmento(self):
         assert context_key("pycharm", "delacao – segmenter.py") == "dev:delacao"
@@ -45,8 +45,8 @@ class TestContextKey:
 
 class TestSampleKey:
     def test_chamada_vence_ociosidade(self):
-        s = amostra(0, idle=10_000_000, call="Meet — abc-defg-hij")
-        assert sample_key(s, 180) == "call:Meet — abc-defg-hij"
+        s = amostra(0, idle=10_000_000, call="Meet - abc-defg-hij")
+        assert sample_key(s, 180) == "call:Meet - abc-defg-hij"
 
     def test_ocioso_vira_vazio(self):
         assert sample_key(amostra(0, idle=180_000), 180) == "__vazio__"
@@ -69,10 +69,10 @@ class TestBuildSpans:
 
     def test_shadow_registra_atividade_paralela_na_chamada(self):
         # Em chamada, mas com janela ativa de dev e sem ociosidade → shadow
-        spans = build_spans([amostra(0, call="Meet — reunião"),
-                             amostra(5, call="Meet — reunião")])
+        spans = build_spans([amostra(0, call="Meet - reunião"),
+                             amostra(5, call="Meet - reunião")])
         assert len(spans) == 1
-        assert spans[0]["key"] == "call:Meet — reunião"
+        assert spans[0]["key"] == "call:Meet - reunião"
         assert spans[0]["shadow"]["dev:delacao"] == 10
 
 

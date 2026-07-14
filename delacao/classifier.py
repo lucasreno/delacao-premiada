@@ -58,6 +58,7 @@ def classify(blocks):
         "O campo 'migalhas_absorvidas' lista verificações rápidas (< 5 min) engolidas pelo "
         "bloco (ex.: devchecks, conferências no Jira); quando forem assunto distinto do bloco, "
         "cite-as brevemente no fim da descricao.\n"
+        "Nunca use travessão (—) na descricao; use vírgula, ponto ou hífen simples (-).\n"
     )
     if jira:
         sys_prompt += (

@@ -1,5 +1,5 @@
 """Cliente do Clockify: leitura do espaço de opções (Projetos, Atividades) e do
-histórico para o bootstrap; escrita restrita ao envio de dias aprovados (ADR-0002 —
+histórico para o bootstrap; escrita restrita ao envio de dias aprovados (ADR-0002 -
 só cria Lançamentos e só apaga os que a própria ferramenta criou)."""
 
 from datetime import datetime, timezone
@@ -83,7 +83,7 @@ def sync():
 def push_day(date):
     """Cria no Clockify os Lançamentos do dia aprovado. Reenvio substitui: os ids
     criados ficam em cache (`clockify_entries:{date}`) e são apagados antes de
-    recriar — a ferramenta nunca toca em lançamentos que não criou."""
+    recriar - a ferramenta nunca toca em lançamentos que não criou."""
     key = db.setting("clockify_api_key")
     if not key:
         raise RuntimeError("Chave do Clockify não configurada (Configurações).")
@@ -120,7 +120,7 @@ def push_day(date):
                  if b["ticket"].lower() in (t.get("name") or "").lower()), None)
         desc = b["descricao"] or ""
         if b["ticket"] and not task_id:  # sem Task correspondente, o código vai na Descrição
-            desc = f"{b['ticket']} — {desc}".strip(" —")
+            desc = f"{b['ticket']} - {desc}".strip(" -")
         body = {"start": _iso_utc(b["start_ts"]), "end": _iso_utc(b["end_ts"]),
                 "projectId": pid, "description": desc}
         if task_id:

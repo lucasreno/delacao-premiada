@@ -317,7 +317,7 @@ def put_blocks(date: str, body: dict = Body(...)):
 def approve(date: str):
     rows = db.q("SELECT * FROM blocks WHERE date=? ORDER BY start_ts", (date,))
     if not rows:
-        raise HTTPException(400, "Nada para aprovar — gere a proposta primeiro.")
+        raise HTTPException(400, "Nada para aprovar - gere a proposta primeiro.")
     now = int(time.time())
     # Re-aprovar substitui as correções do dia em vez de duplicá-las (elas alimentam
     # o few-shot do classifier; duplicata envenena o aprendizado).

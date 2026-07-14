@@ -1,4 +1,4 @@
-# dados locais (amostras, chaves em settings, aprendizado) — nunca versionar
+# dados locais (amostras, chaves em settings, aprendizado) - nunca versionar
 data/
 
 __pycache__/

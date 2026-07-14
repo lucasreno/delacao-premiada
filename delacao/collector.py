@@ -126,7 +126,7 @@ class X11Backend:
                 idle = int(subprocess.check_output(["xprintidle"], timeout=2))
             except Exception:
                 # Sem fonte de ociosidade o usuário nunca fica "ocioso" e as Lacunas
-                # somem — sinaliza para o /api/status em vez de falhar calado.
+                # somem - sinaliza para o /api/status em vez de falhar calado.
                 self.idle_ok = False
                 return 0
         self.idle_ok = True
@@ -162,7 +162,7 @@ def read_sample(backend, patterns):
 
 def purge_samples():
     """Apaga amostras de dias já aprovados há mais de N dias (títulos de janela são
-    dado sensível — ver ADR-0001; depois de aprovado, o dia não precisa mais delas)."""
+    dado sensível - ver ADR-0001; depois de aprovado, o dia não precisa mais delas)."""
     try:
         days = int(db.setting("retention_days", config.RETENTION_DAYS))
     except (TypeError, ValueError):

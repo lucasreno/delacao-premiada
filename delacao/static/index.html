@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>Delação Premiada — Revisão</title>
+<title>Delação Premiada - Revisão</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
@@ -160,7 +160,7 @@
   </table>
   <div style="margin-top:8px">
     <button class="sec" onclick="addRow()">+ Linha</button>
-    <button class="sec" onclick="saveBlocks()" title="Grava as edições sem aprovar o dia — use pra ir salvando enquanto revisa">Salvar edições</button>
+    <button class="sec" onclick="saveBlocks()" title="Grava as edições sem aprovar o dia - use pra ir salvando enquanto revisa">Salvar edições</button>
     <button onclick="approve()" title="Grava as edições E aprova o dia (libera o envio ao Clockify e alimenta o aprendizado da IA)">Aprovar dia</button>
     <a id="csvLink" class="btn ghost" href="#" download>Baixar CSV</a>
   </div>
@@ -168,7 +168,7 @@
 
 <section class="card">
   <details id="migalhasBox">
-    <summary><b>Migalhas absorvidas</b> <span class="mut">(interrupções &lt; 5 min — promova se mereciam Lançamento)</span></summary>
+    <summary><b>Migalhas absorvidas</b> <span class="mut">(interrupções &lt; 5 min - promova se mereciam Lançamento)</span></summary>
     <div id="migalhas" style="margin-top:8px"></div>
   </details>
 </section>
@@ -190,11 +190,11 @@
     <input id="or" placeholder="deixe vazio para manter">
     <label>Modelo (OpenRouter)</label>
     <input id="model">
-    <label>Jira — URL base <span class="mut">(ex.: https://empresa.atlassian.net; vazio = sem Jira)</span></label>
+    <label>Jira - URL base <span class="mut">(ex.: https://empresa.atlassian.net; vazio = sem Jira)</span></label>
     <input id="jiraUrl">
-    <label>Jira — e-mail <span class="mut">(Cloud; deixe vazio se usar token pessoal de Server/DC)</span></label>
+    <label>Jira - e-mail <span class="mut">(Cloud; deixe vazio se usar token pessoal de Server/DC)</span></label>
     <input id="jiraEmail">
-    <label>Jira — API token <span class="mut" id="jiraState"></span></label>
+    <label>Jira - API token <span class="mut" id="jiraState"></span></label>
     <input id="jiraTok" placeholder="deixe vazio para manter">
     <div style="margin-top:12px; display:flex; gap:8px">
       <button type="button" onclick="saveSettings()">Salvar</button>
@@ -214,7 +214,7 @@ const dlg = $('dlg');
 let options = { projetos: [], atividades: [] };
 const state = { migalhas: [], resumo: [] };
 
-// Títulos de janela e saídas da IA são dado hostil — escapar SEMPRE antes de interpolar em HTML.
+// Títulos de janela e saídas da IA são dado hostil - escapar SEMPRE antes de interpolar em HTML.
 const esc = s => String(s ?? '').replace(/[&<>"']/g,
   c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 
@@ -247,7 +247,7 @@ function row(b) {
     tr.innerHTML = `
       <td><input class="time" data-f="start" value="${esc(b.start)}"></td>
       <td><input class="time" data-f="end" value="${esc(b.end)}"></td>
-      <td colspan="4"><b>Lacuna (${b.dur_min} min sem atividade)</b> — estava em quê?
+      <td colspan="4"><b>Lacuna (${b.dur_min} min sem atividade)</b> - estava em quê?
         <button onclick="lacunaTrabalho(this)">Era trabalho</button>
         <button class="sec" onclick="lacunaPausa(this)">Era pausa/almoço</button></td>
       <td></td><td></td>`;
@@ -333,7 +333,7 @@ function renderTimeline(d) {
     if (b.kind !== 'lacuna') seg.style.background = colorFor(b.projeto);
     seg.title = b.kind === 'lacuna'
       ? `${b.start}–${b.end}  Lacuna (${b.dur_min} min)`
-      : `${b.start}–${b.end}  ${b.projeto || b.contexto || '?'}${b.descricao ? ' — ' + b.descricao : ''}`;
+      : `${b.start}–${b.end}  ${b.projeto || b.contexto || '?'}${b.descricao ? ' - ' + b.descricao : ''}`;
     if (b.id) seg.onclick = () => {
       const tr = [...$('tbl').tBodies[0].rows].find(r => +r.dataset.id === b.id);
       if (tr) { tr.scrollIntoView({ block: 'center', behavior: 'smooth' }); tr.classList.remove('flash'); void tr.offsetWidth; tr.classList.add('flash'); }
@@ -400,7 +400,7 @@ function render(d) {
   renderTimeline(d);
   if (d.status === 'aprovado' && d.resumo) {
     state.resumo = d.resumo;
-    $('diverg').textContent = ` — total ${Math.floor(d.total_min / 60)}h${String(d.total_min % 60).padStart(2, '0')}` +
+    $('diverg').textContent = ` - total ${Math.floor(d.total_min / 60)}h${String(d.total_min % 60).padStart(2, '0')}` +
       (d.divergencia_min != null ? `, divergência do ponto: ${d.divergencia_min} min` : '');
     $('resumo').innerHTML = d.resumo.map((l, i) =>
       `<div class="rl"><code>${esc(l)}</code><button onclick="copyLine(${i})">⧉</button></div>`).join('');
@@ -493,7 +493,7 @@ async function approve() {
     state.resumo = r.resumo;
     $('resumo').innerHTML = r.resumo.map((l, i) =>
       `<div class="rl"><code>${esc(l)}</code><button class="ghost" title="Copiar linha" onclick="copyLine(${i})">⧉</button></div>`).join('');
-    $('diverg').textContent = ` — total ${Math.floor(r.total_min / 60)}h${String(r.total_min % 60).padStart(2, '0')}` +
+    $('diverg').textContent = ` - total ${Math.floor(r.total_min / 60)}h${String(r.total_min % 60).padStart(2, '0')}` +
       (r.divergencia_min != null ? `, divergência do ponto: ${r.divergencia_min} min` : '');
     $('resumoCard').style.display = '';
     $('pushMsg').textContent = '';
@@ -508,7 +508,7 @@ async function pushClockify() {
     const r = await api(`/day/${$('date').value}/clockify`, 'POST');
     $('pushMsg').textContent = `${r.criados} lançamento(s) criado(s)` +
       (r.substituidos ? `, ${r.substituidos} substituído(s)` : '') +
-      (r.erros.length ? ` — erros: ${r.erros.join(' | ')}` : '.');
+      (r.erros.length ? ` - erros: ${r.erros.join(' | ')}` : '.');
   } catch (e) { $('pushMsg').textContent = 'Erro: ' + e.message; }
 }
 
@@ -554,7 +554,7 @@ async function refreshStatus() {
   const c = s.coletor || {};
   let alerta = '';
   if (c.erro) alerta = ` <span class="err">⚠ coletor com erro: ${esc(c.erro)}</span>`;
-  else if (c.ociosidade_ok === false) alerta = ' <span class="err">⚠ detecção de ociosidade indisponível — Lacunas não serão detectadas</span>';
+  else if (c.ociosidade_ok === false) alerta = ' <span class="err">⚠ detecção de ociosidade indisponível - Lacunas não serão detectadas</span>';
   $('colStatus').innerHTML = `<span class="dot ${s.samples_hoje ? 'ok' : ''}"></span> ${s.samples_hoje} amostras hoje` +
     (s.ultima ? ` <span class="mut">(última ${esc(s.ultima.hora)}: ${esc(s.ultima.app)})</span>` : '') + alerta;
 }
