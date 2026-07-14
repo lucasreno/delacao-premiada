@@ -78,15 +78,17 @@
   </table>
   <div style="margin-top:8px">
     <button class="sec" onclick="addRow()">+ Linha</button>
-    <button class="sec" onclick="saveBlocks()">Salvar edições</button>
-    <button onclick="approve()">Aprovar dia</button>
+    <button class="sec" onclick="saveBlocks()" title="Grava as edições sem aprovar o dia — use pra ir salvando enquanto revisa">Salvar edições</button>
+    <button onclick="approve()" title="Grava as edições E aprova o dia (libera o envio ao Clockify e alimenta o aprendizado da IA)">Aprovar dia</button>
     <a id="csvLink" class="btn ghost" href="#" download>Baixar CSV</a>
   </div>
 </section>
 
 <section class="card">
-  <b>Migalhas absorvidas</b> <span class="mut">(interrupções &lt; 5 min — promova se mereciam Lançamento)</span>
-  <div id="migalhas"></div>
+  <details id="migalhasBox">
+    <summary><b>Migalhas absorvidas</b> <span class="mut">(interrupções &lt; 5 min — promova se mereciam Lançamento)</span></summary>
+    <div id="migalhas" style="margin-top:8px"></div>
+  </details>
 </section>
 
 <section class="card" id="resumoCard" style="display:none">
@@ -310,6 +312,9 @@ function render(d) {
     `<span class="chip">${esc(m.hora)} · ${m.dur_min}min · ${esc(m.title || m.contexto)}
      <button onclick="promover(${i})">Promover</button></span>`).join('') ||
     '<span class="mut">nenhuma</span>';
+  $('migalhasBox').querySelector('summary b').textContent =
+    `Migalhas absorvidas (${d.migalhas.length})`;
+  $('migalhasBox').open = d.migalhas.length <= 3;
   renderTimeline(d);
   if (d.status === 'aprovado' && d.resumo) {
     state.resumo = d.resumo;

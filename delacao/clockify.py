@@ -42,7 +42,7 @@ def sync():
     ws, uid = me["activeWorkspace"], me["id"]
 
     projects = _get(key, f"/workspaces/{ws}/projects", {"page-size": 200, "archived": "false"})
-    tags = _get(key, f"/workspaces/{ws}/tags", {"page-size": 200})
+    tags = _get(key, f"/workspaces/{ws}/tags", {"page-size": 200, "archived": "false"})
 
     entries = []
     for page in (1, 2, 3):
