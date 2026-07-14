@@ -118,6 +118,14 @@ def push_day(date):
             task_id = next(
                 (t["id"] for t in tasks_by_project[pid]
                  if b["ticket"].lower() in (t.get("name") or "").lower()), None)
+            if not task_id:
+                try:
+                    task = _post(key, f"/workspaces/{ws}/projects/{pid}/tasks",
+                                  {"name": b["ticket"]})
+                    task_id = task["id"]
+                    tasks_by_project[pid].append(task)
+                except httpx.HTTPStatusError:
+                    pass  # provável Task com esse nome já existe em outro Projeto
         desc = b["descricao"] or ""
         if b["ticket"] and not task_id:  # sem Task correspondente, o código vai na Descrição
             desc = f"{b['ticket']} - {desc}".strip(" -")

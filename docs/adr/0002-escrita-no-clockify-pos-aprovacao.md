@@ -23,7 +23,9 @@ explícito**:
   criou para aquele dia (404 é ignorado) e recria - idempotente, sem duplicar;
 - a ferramenta **nunca edita nem apaga** lançamentos que não criou;
 - Ticket vira `taskId` quando existe Task com o código no nome dentro do
-  Projeto; sem Task correspondente, o código vai no início da Descrição
+  Projeto; se não existir, a ferramenta tenta criar a Task nesse Projeto;
+  se a criação falhar (ex. já existe Task com esse nome em outro Projeto,
+  Clockify não permite duplicar), o código vai no início da Descrição
   (mesmo lugar onde o histórico do usuário o carrega);
 - Atividade vira a Tag homônima; Projeto inexistente no Clockify não derruba
   o envio: o bloco é pulado e reportado em `erros`.
