@@ -4,8 +4,10 @@ Regras (ver CONTEXT.md):
 - chamada ativa vence ociosidade e vence a janela ativa em outro monitor;
 - trabalho contíguo < MIGALHA_S é absorvido pelo bloco vizinho e dedatado; os títulos
   da Migalha ficam na evidência do bloco absorvedor (campo `migalhas`);
+- uma sequência de Migalhas sem bloco vizinho que, somada, alcança MIGALHA_S vira
+  um Bloco de Trabalho próprio, para não deslocar o início do próximo contexto;
 - vazio (ocioso/sem dados) <= STITCH_S é emendado ao bloco anterior;
-- vazio maior vira Lacuna (pergunta na Revisão).
+- vazio maior, inclusive nas bordas da Jornada, vira Lacuna (pergunta na Revisão).
 """
 
 import re
@@ -80,22 +82,49 @@ def build_spans(samples, poll_s=config.POLL_S, idle_after_s=config.IDLE_AFTER_S,
 
 def consolidate(spans, migalha_s=config.MIGALHA_S, stitch_s=config.STITCH_S):
     out, migalhas = [], []
-    pending_start = None
-    pending_migalhas = Counter()  # títulos de Migalhas ainda sem bloco absorvedor
+    pending = []  # Migalhas ainda sem Bloco de Trabalho absorvedor
 
     def top_title(sp):
         return sp["titles"].most_common(1)[0][0] if sp["titles"] else ""
+
+    def pending_duration():
+        return sum(sp["end"] - sp["start"] for sp in pending)
+
+    def pending_counter(field):
+        total = Counter()
+        for item in pending:
+            total += item[field]
+        return total
+
+    def flush_pending():
+        """Materializa uma sequência de Migalhas que deixou de ser curta."""
+        if not pending or pending_duration() < migalha_s:
+            return False
+        durations = Counter()
+        for item in pending:
+            durations[item["key"]] += item["end"] - item["start"]
+        out.append({
+            "kind": "work",
+            "key": durations.most_common(1)[0][0],
+            "start": pending[0]["start"],
+            "end": pending[-1]["end"],
+            "titles": pending_counter("titles"),
+            "shadow": pending_counter("shadow"),
+            "migalhas": Counter(),
+        })
+        pending.clear()
+        return True
 
     for sp in spans:
         dur = sp["end"] - sp["start"]
         prev = out[-1] if out else None
         if sp["key"] == "__vazio__":
             if dur > stitch_s:
+                flush_pending()
                 out.append({"kind": "lacuna", "key": "lacuna", "start": sp["start"],
                             "end": sp["end"], "titles": Counter(), "shadow": Counter(),
                             "migalhas": Counter()})
-                pending_start = None
-                pending_migalhas = Counter()
+                pending.clear()
             elif prev and prev["kind"] == "work":
                 prev["end"] = sp["end"]
             continue
@@ -106,12 +135,20 @@ def consolidate(spans, migalha_s=config.MIGALHA_S, stitch_s=config.STITCH_S):
                 prev["end"] = sp["end"]
                 prev["migalhas"] += sp["titles"]
             else:
-                if pending_start is None:
-                    pending_start = sp["start"]
-                pending_migalhas += sp["titles"]
+                pending.append(sp)
             continue
-        start = pending_start if pending_start is not None else sp["start"]
-        pending_start = None
+
+        pending_migalhas = Counter()
+        if flush_pending():
+            start = sp["start"]
+            prev = out[-1]
+        elif pending:
+            start = pending[0]["start"]
+            pending_migalhas = pending_counter("titles")
+            pending.clear()
+        else:
+            start = sp["start"]
+
         if prev and prev["kind"] == "work" and prev["key"] == sp["key"]:
             prev["end"] = sp["end"]
             prev["titles"] += sp["titles"]
@@ -121,14 +158,31 @@ def consolidate(spans, migalha_s=config.MIGALHA_S, stitch_s=config.STITCH_S):
             out.append({"kind": "work", "key": sp["key"], "start": start, "end": sp["end"],
                         "titles": sp["titles"].copy(), "shadow": sp["shadow"].copy(),
                         "migalhas": pending_migalhas.copy()})
-        pending_migalhas = Counter()
+    flush_pending()
     return out, migalhas
 
 
-def fit_to_period(blocks, period_start, period_end):
-    """Recorta os blocos ao período do ponto e emenda as costuras: o primeiro
-    estica até a entrada, o último até a saída, e cada buraco interno gruda
-    no bloco anterior (a pausa pertence ao trabalho que acabou de fechar)."""
+def fit_to_period(blocks, period_start, period_end, stitch_s=config.STITCH_S):
+    """Recorta os blocos à Jornada e cobre as costuras.
+
+    Vazios de até ``stitch_s`` pertencem ao contexto vizinho. Vazios maiores,
+    inclusive antes da primeira e depois da última amostra, viram Lacunas em
+    vez de alterar falsamente o horário de um Bloco de Trabalho.
+    """
+    def lacuna(start, end):
+        return {
+            "kind": "lacuna", "key": "lacuna", "start": start, "end": end,
+            "titles": Counter(), "shadow": Counter(), "migalhas": Counter(),
+        }
+
+    def append_merged(target, block):
+        if (target and target[-1]["kind"] == "lacuna"
+                and block["kind"] == "lacuna"
+                and target[-1]["end"] >= block["start"]):
+            target[-1]["end"] = max(target[-1]["end"], block["end"])
+        else:
+            target.append(block)
+
     inside = []
     for b in blocks:
         if b["end"] <= period_start or b["start"] >= period_end:
@@ -139,12 +193,29 @@ def fit_to_period(blocks, period_start, period_end):
         inside.append(nb)
     if not inside:
         return []
-    inside[0]["start"] = period_start
-    inside[-1]["end"] = period_end
-    for i in range(len(inside) - 1):
-        if inside[i]["end"] < inside[i + 1]["start"]:
-            inside[i]["end"] = inside[i + 1]["start"]
-    return inside
+
+    fitted = []
+    leading_gap = inside[0]["start"] - period_start
+    if leading_gap > stitch_s:
+        append_merged(fitted, lacuna(period_start, inside[0]["start"]))
+    else:
+        inside[0]["start"] = period_start
+    append_merged(fitted, inside[0])
+
+    for current in inside[1:]:
+        gap = current["start"] - fitted[-1]["end"]
+        if gap > stitch_s:
+            append_merged(fitted, lacuna(fitted[-1]["end"], current["start"]))
+        elif gap > 0:
+            fitted[-1]["end"] = current["start"]
+        append_merged(fitted, current)
+
+    trailing_gap = period_end - fitted[-1]["end"]
+    if trailing_gap > stitch_s:
+        append_merged(fitted, lacuna(fitted[-1]["end"], period_end))
+    elif trailing_gap > 0:
+        fitted[-1]["end"] = period_end
+    return fitted
 
 
 def segment(samples, periods):

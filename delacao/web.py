@@ -329,7 +329,13 @@ def approve(date: str):
                  "atividade": b["atividade"], "descricao": b["descricao"]}
         if json.loads(b["proposed"]) != final:
             evidence = json.dumps(
-                {"contexto": b["context_key"], **json.loads(b["evidence"] or "{}")},
+                {
+                    "contexto": b["context_key"],
+                    "inicio": _hm(b["start_ts"]),
+                    "fim": _hm(b["end_ts"]),
+                    "duracao_min": (b["end_ts"] - b["start_ts"]) // 60,
+                    **json.loads(b["evidence"] or "{}"),
+                },
                 ensure_ascii=False)
             db.ex(
                 "INSERT INTO corrections(ts, date, evidence, proposed, final) VALUES(?,?,?,?,?)",

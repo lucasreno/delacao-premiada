@@ -121,6 +121,24 @@ class TestConsolidate:
         assert len(blocks) == 1
         assert blocks[0]["titles"] == Counter({"t1": 600, "t2": 600})
 
+    def test_sequencia_longa_de_migalhas_nao_adianta_reuniao(self):
+        inicio = 10 * 3600 + 9 * 60
+        onze_horas = 11 * 3600
+        spans = [
+            span(f"web:{i}", inicio + i * 60, inicio + (i + 1) * 60,
+                 {f"Janela {i}": 60})
+            for i in range(51)
+        ]
+        spans.append(span("call:Daily", onze_horas, onze_horas + 20 * 60,
+                          {"Meet - Daily": 20 * 60}))
+
+        blocks, _ = consolidate(spans)
+
+        assert [(b["start"], b["end"], b["key"]) for b in blocks] == [
+            (inicio, onze_horas, "web:0"),
+            (onze_horas, onze_horas + 20 * 60, "call:Daily"),
+        ]
+
 
 class TestFitToPeriod:
     def blocos(self):
@@ -142,6 +160,22 @@ class TestFitToPeriod:
 
     def test_vazio_retorna_vazio(self):
         assert fit_to_period([], 0, 100) == []
+
+    def test_lacuna_longa_antes_da_primeira_amostra_nao_vira_reuniao(self):
+        inicio = 10 * 3600 + 9 * 60
+        onze_horas = 11 * 3600
+        blocks = [{
+            "kind": "work", "key": "call:Daily", "start": onze_horas,
+            "end": onze_horas + 20 * 60, "titles": Counter({"Meet - Daily": 1200}),
+            "shadow": Counter(), "migalhas": Counter(),
+        }]
+
+        fitted = fit_to_period(blocks, inicio, onze_horas + 20 * 60)
+
+        assert [(b["kind"], b["start"], b["end"]) for b in fitted] == [
+            ("lacuna", inicio, onze_horas),
+            ("work", onze_horas, onze_horas + 20 * 60),
+        ]
 
 
 class TestSegment:
