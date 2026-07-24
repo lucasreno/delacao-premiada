@@ -45,9 +45,10 @@ def configure(monkeypatch, response):
     )
     captured = {}
 
-    def fake_openrouter(messages, model):
+    def fake_openrouter(messages, model, max_completion_tokens=None):
         captured["messages"] = messages
         captured["model"] = model
+        captured["max_completion_tokens"] = max_completion_tokens
         return json.dumps(response, ensure_ascii=False)
 
     monkeypatch.setattr(classifier, "_openrouter", fake_openrouter)
@@ -77,6 +78,7 @@ def test_prompt_recebe_horario_e_separa_sinais_secundarios(monkeypatch):
     assert "conteúdo não confiável" in prompt
     assert "Daily nunca recebe Ticket" in prompt
     assert "exatamente um objeto para cada id" in prompt
+    assert captured["max_completion_tokens"] == 512
 
 
 def test_saida_e_canonizada_e_valores_inventados_sao_descartados(monkeypatch):
@@ -222,3 +224,74 @@ def test_aplicar_classificacao_consegue_limpar_ticket_antigo(monkeypatch):
     assert "ticket=?" in sql
     assert "COALESCE" not in sql
     assert args[1] is None
+
+
+def test_terra_usa_raciocinio_medio_e_json_schema_sem_temperature(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        classifier.db,
+        "setting",
+        lambda key: "chave-teste" if key == "openrouter_api_key" else None,
+    )
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": "[]"}}]}
+
+    def fake_post(url, headers, json, timeout):
+        captured["body"] = json
+        return Response()
+
+    monkeypatch.setattr(classifier.httpx, "post", fake_post)
+
+    classifier._openrouter(
+        [{"role": "user", "content": "[]"}],
+        "openai/gpt-5.6-terra",
+        max_completion_tokens=640,
+    )
+
+    body = captured["body"]
+    assert "temperature" not in body
+    assert body["reasoning"] == {"effort": "medium", "exclude": True}
+    assert body["max_completion_tokens"] == 640
+    assert body["response_format"]["type"] == "json_schema"
+    schema = body["response_format"]["json_schema"]
+    assert schema["strict"] is True
+    assert schema["schema"]["type"] == "array"
+
+
+def test_modelo_nao_gpt_56_mantem_requisicao_compativel(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        classifier.db,
+        "setting",
+        lambda key: "chave-teste" if key == "openrouter_api_key" else None,
+    )
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": "[]"}}]}
+
+    monkeypatch.setattr(
+        classifier.httpx,
+        "post",
+        lambda url, headers, json, timeout: (
+            captured.update({"body": json}) or Response()
+        ),
+    )
+
+    classifier._openrouter(
+        [{"role": "user", "content": "[]"}],
+        "google/gemini-2.5-flash-lite",
+        max_completion_tokens=640,
+    )
+
+    assert captured["body"]["temperature"] == 0.2
+    assert "reasoning" not in captured["body"]
+    assert "response_format" not in captured["body"]

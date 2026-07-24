@@ -11,15 +11,70 @@ from . import config, db
 
 TICKET_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]{1,9}-\d{1,6}\b", re.IGNORECASE)
 
+CLASSIFICATION_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "id": {
+                "type": "integer",
+                "description": "Id do bloco recebido na entrada.",
+            },
+            "projeto": {
+                "type": ["string", "null"],
+                "description": "Projeto permitido ou null.",
+            },
+            "ticket": {
+                "type": ["string", "null"],
+                "description": "Ticket no padrão ABC-123 ou null.",
+            },
+            "atividade": {
+                "type": ["string", "null"],
+                "description": "Atividade permitida ou null.",
+            },
+            "descricao": {
+                "type": ["string", "null"],
+                "description": "Descrição curta e específica em português.",
+            },
+            "confianca": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Confiança calibrada entre 0 e 1.",
+            },
+        },
+        "required": [
+            "id", "projeto", "ticket", "atividade", "descricao", "confianca",
+        ],
+        "additionalProperties": False,
+    },
+}
 
-def _openrouter(messages, model):
+
+def _openrouter(messages, model, max_completion_tokens=None):
     key = db.setting("openrouter_api_key")
     if not key:
         raise RuntimeError("Chave do OpenRouter não configurada (Configurações).")
+    body = {"model": model, "messages": messages}
+    if model == "openai/gpt-5.6" or model.startswith("openai/gpt-5.6-"):
+        body.update({
+            "reasoning": {"effort": "medium", "exclude": True},
+            "max_completion_tokens": max_completion_tokens or 1024,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "classificacoes_clockify",
+                    "strict": True,
+                    "schema": CLASSIFICATION_SCHEMA,
+                },
+            },
+        })
+    else:
+        body["temperature"] = 0.2
     r = httpx.post(
         config.OPENROUTER_URL,
         headers={"Authorization": f"Bearer {key}"},
-        json={"model": model, "messages": messages, "temperature": 0.2},
+        json=body,
         timeout=120,
     )
     r.raise_for_status()
@@ -224,6 +279,7 @@ def classify(blocks):
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ],
         model,
+        max_completion_tokens=max(512, min(8192, len(blocks) * 192)),
     )
     blocks_by_id = {block["id"]: block for block in blocks}
     known_ids = {str(block_id): block_id for block_id in blocks_by_id}
