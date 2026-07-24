@@ -1,6 +1,9 @@
 import json
 from datetime import datetime
 
+import httpx
+import pytest
+
 from delacao import classifier, web
 
 
@@ -260,7 +263,9 @@ def test_terra_usa_raciocinio_medio_e_json_schema_sem_temperature(monkeypatch):
     assert body["response_format"]["type"] == "json_schema"
     schema = body["response_format"]["json_schema"]
     assert schema["strict"] is True
-    assert schema["schema"]["type"] == "array"
+    assert schema["schema"]["type"] == "object"
+    classifications = schema["schema"]["properties"]["classificacoes"]
+    assert classifications["type"] == "array"
 
 
 def test_modelo_nao_gpt_56_mantem_requisicao_compativel(monkeypatch):
@@ -295,3 +300,45 @@ def test_modelo_nao_gpt_56_mantem_requisicao_compativel(monkeypatch):
     assert captured["body"]["temperature"] == 0.2
     assert "reasoning" not in captured["body"]
     assert "response_format" not in captured["body"]
+
+
+def test_parser_aceita_objeto_de_saida_estruturada():
+    content = json.dumps({
+        "classificacoes": [{
+            "id": 7,
+            "projeto": "Projeto Alpha",
+            "ticket": None,
+            "atividade": "Daily",
+            "descricao": "Daily do time",
+            "confianca": 0.95,
+        }]
+    })
+
+    result = classifier._parse_json_array(content)
+
+    assert result[0]["id"] == 7
+
+
+def test_erro_openrouter_inclui_mensagem_da_resposta(monkeypatch):
+    monkeypatch.setattr(
+        classifier.db,
+        "setting",
+        lambda key: "chave-teste" if key == "openrouter_api_key" else None,
+    )
+    request = httpx.Request("POST", classifier.config.OPENROUTER_URL)
+    response = httpx.Response(
+        400,
+        request=request,
+        json={"error": {"message": "Schema inválido: raiz deve ser object"}},
+    )
+    monkeypatch.setattr(classifier.httpx, "post", lambda *args, **kwargs: response)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Schema inválido: raiz deve ser object",
+    ):
+        classifier._openrouter(
+            [{"role": "user", "content": "{}"}],
+            "openai/gpt-5.6-terra",
+            max_completion_tokens=640,
+        )
