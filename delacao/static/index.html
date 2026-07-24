@@ -76,6 +76,15 @@
   table { width:100%; border-collapse:collapse; }
   th { text-align:left; color:var(--mut-soft); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.04em; padding:6px 8px 10px; }
   td { padding:6px 8px; border-top:1px solid var(--card-border); vertical-align:middle; }
+  .table-scroll { overflow-x:auto; }
+  #tbl { min-width:900px; table-layout:fixed; }
+  #tbl .col-time { width:84px; }
+  #tbl .col-project { width:20%; }
+  #tbl .col-ticket { width:12%; }
+  #tbl .col-activity { width:16%; }
+  #tbl .col-actions { width:82px; }
+  .description-field { display:flex; align-items:center; gap:4px; }
+  .description-field input { flex:1; min-width:0; }
   tbody tr { transition:background-color .15s ease; }
   tbody tr:hover { background:color-mix(in srgb, var(--acc) 4%, transparent); }
   tr.lacuna { background:var(--lac); }
@@ -151,13 +160,19 @@
 </section>
 
 <section class="card">
-  <table id="tbl">
-    <thead><tr>
-      <th>Início</th><th>Fim</th><th style="width:18%">Projeto</th><th style="width:10%">Ticket</th>
-      <th style="width:14%">Atividade</th><th>Descrição</th><th>Contexto</th><th></th>
-    </tr></thead>
-    <tbody></tbody>
-  </table>
+  <div class="table-scroll">
+    <table id="tbl">
+      <colgroup>
+        <col class="col-time"><col class="col-time"><col class="col-project"><col class="col-ticket">
+        <col class="col-activity"><col><col class="col-actions">
+      </colgroup>
+      <thead><tr>
+        <th>Início</th><th>Fim</th><th>Projeto</th><th>Ticket</th>
+        <th>Atividade</th><th>Descrição</th><th></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
   <div style="margin-top:8px">
     <button class="sec" onclick="addRow()">+ Linha</button>
     <button class="sec" onclick="saveBlocks()" title="Grava as edições sem aprovar o dia - use pra ir salvando enquanto revisa">Salvar edições</button>
@@ -250,7 +265,7 @@ function row(b) {
       <td colspan="4"><b>Lacuna (${b.dur_min} min sem atividade)</b> - estava em quê?
         <button onclick="lacunaTrabalho(this)">Era trabalho</button>
         <button class="sec" onclick="lacunaPausa(this)">Era pausa/almoço</button></td>
-      <td></td><td></td>`;
+      <td></td>`;
     return tr;
   }
   const ev = Object.entries(b.evidence?.titles || {})
@@ -263,6 +278,7 @@ function row(b) {
   const conf = b.confianca != null
     ? `<span class="conf${b.confianca < 0.7 ? ' low' : ''}" title="confiança da IA">${b.confianca < 0.7 ? '⚠ ' : ''}${Math.round(b.confianca * 100)}%</span>` : '';
   const edited = b.edited ? '<span class="conf" title="editado por você">✎</span>' : '';
+  const evidence = [`Contexto: ${b.contexto || 'manual'}`, ev + mig + shadow].filter(Boolean).join('\n');
   if (b.confianca != null && b.confianca < 0.7) tr.className = 'low';
   tr.innerHTML = `
     <td><input class="time" data-f="start" value="${esc(b.start)}"></td>
@@ -270,8 +286,7 @@ function row(b) {
     <td><input data-f="projeto" list="projList" value="${esc(b.projeto)}"></td>
     <td><input data-f="ticket" value="${esc(b.ticket)}"></td>
     <td>${tagSelect(b.atividade)}</td>
-    <td><input data-f="descricao" value="${esc(b.descricao)}"></td>
-    <td class="mut"><span class="ev" title="${esc(ev + mig + shadow)}">${esc(b.contexto || 'manual')}${shadow ? ' ⚠' : ''}</span>${conf}${edited}</td>
+    <td><div class="description-field" title="${esc(evidence)}"><input data-f="descricao" value="${esc(b.descricao)}">${shadow ? '<span class="conf" title="atividade paralela detectada">⚠</span>' : ''}${conf}${edited}</div></td>
     <td>${b.id ? `<button class="ghost" title="Reclassificar só este bloco via IA" onclick="reclassifyOne(${b.id})">🔁</button>` : ''}<button class="ghost" onclick="this.closest('tr').remove()">✕</button></td>`;
   return tr;
 }
