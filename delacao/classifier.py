@@ -12,42 +12,49 @@ from . import config, db
 TICKET_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]{1,9}-\d{1,6}\b", re.IGNORECASE)
 
 CLASSIFICATION_SCHEMA = {
-    "type": "array",
-    "items": {
-        "type": "object",
-        "properties": {
-            "id": {
-                "type": "integer",
-                "description": "Id do bloco recebido na entrada.",
-            },
-            "projeto": {
-                "type": ["string", "null"],
-                "description": "Projeto permitido ou null.",
-            },
-            "ticket": {
-                "type": ["string", "null"],
-                "description": "Ticket no padrão ABC-123 ou null.",
-            },
-            "atividade": {
-                "type": ["string", "null"],
-                "description": "Atividade permitida ou null.",
-            },
-            "descricao": {
-                "type": ["string", "null"],
-                "description": "Descrição curta e específica em português.",
-            },
-            "confianca": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1,
-                "description": "Confiança calibrada entre 0 e 1.",
+    "type": "object",
+    "properties": {
+        "classificacoes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "description": "Id do bloco recebido na entrada.",
+                    },
+                    "projeto": {
+                        "type": ["string", "null"],
+                        "description": "Projeto permitido ou null.",
+                    },
+                    "ticket": {
+                        "type": ["string", "null"],
+                        "description": "Ticket no padrão ABC-123 ou null.",
+                    },
+                    "atividade": {
+                        "type": ["string", "null"],
+                        "description": "Atividade permitida ou null.",
+                    },
+                    "descricao": {
+                        "type": ["string", "null"],
+                        "description": "Descrição curta e específica em português.",
+                    },
+                    "confianca": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Confiança calibrada entre 0 e 1.",
+                    },
+                },
+                "required": [
+                    "id", "projeto", "ticket", "atividade", "descricao", "confianca",
+                ],
+                "additionalProperties": False,
             },
         },
-        "required": [
-            "id", "projeto", "ticket", "atividade", "descricao", "confianca",
-        ],
-        "additionalProperties": False,
     },
+    "required": ["classificacoes"],
+    "additionalProperties": False,
 }
 
 
@@ -77,12 +84,34 @@ def _openrouter(messages, model, max_completion_tokens=None):
         json=body,
         timeout=120,
     )
-    r.raise_for_status()
+    try:
+        r.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = None
+        try:
+            error = r.json().get("error")
+            detail = error.get("message") if isinstance(error, dict) else error
+        except (ValueError, AttributeError):
+            pass
+        if not detail:
+            detail = (r.text or "").strip()[:500]
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(
+            f"OpenRouter rejeitou a requisição ({r.status_code}){suffix}"
+        ) from exc
     return r.json()["choices"][0]["message"]["content"]
 
 
 def _parse_json_array(text):
     text = re.sub(r"^```[a-z]*\n?|\n?```$", "", text.strip())
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict) and isinstance(parsed.get("classificacoes"), list):
+        return parsed["classificacoes"]
+    if isinstance(parsed, list):
+        return parsed
     i, j = text.find("["), text.rfind("]")
     if i < 0 or j < 0:
         raise ValueError(f"resposta sem JSON: {text[:200]}")
@@ -162,10 +191,11 @@ def _system_prompt(projects, tags, jira):
         "somente quando a evidência atual for semelhante.\n"
         f"{json.dumps(examples(), ensure_ascii=False)}\n\n"
         "CONTRATO DE SAÍDA\n"
-        "Responda somente um array JSON válido, sem markdown. Retorne exatamente um objeto "
-        "para cada id recebido, na mesma ordem, sem ids extras ou duplicados. Formato: "
-        '[{"id":1,"projeto":"...","ticket":null,"atividade":"...",'
-        '"descricao":"...","confianca":0.9}]'
+        "Responda somente um objeto JSON válido, sem markdown, com a propriedade "
+        "classificacoes. Nela, retorne exatamente um objeto para cada id recebido, na mesma "
+        "ordem, sem ids extras ou duplicados. Formato: "
+        '{"classificacoes":[{"id":1,"projeto":"...","ticket":null,'
+        '"atividade":"...","descricao":"...","confianca":0.9}]}'
     )
     return prompt
 
