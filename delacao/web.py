@@ -246,7 +246,7 @@ def _apply_classification(rows):
         except (TypeError, ValueError):
             conf = None
         db.ex(
-            "UPDATE blocks SET projeto=?, ticket=COALESCE(?, ticket), atividade=?, "
+            "UPDATE blocks SET projeto=?, ticket=?, atividade=?, "
             "descricao=?, proposed=?, confianca=?, edited=0 WHERE id=?",
             (proposed["projeto"], proposed["ticket"], proposed["atividade"],
              proposed["descricao"], json.dumps(proposed, ensure_ascii=False), conf, bid),
